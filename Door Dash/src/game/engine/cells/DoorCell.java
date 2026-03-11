@@ -26,7 +26,5 @@ public class DoorCell extends Cell implements CanisterModifier{
 	public int getEnergy() {
 		return energy;
 	}
-	public void modifyCanister(int canister){
-		this.getMonster().setEnergy(canister);
-	}
+
 }
