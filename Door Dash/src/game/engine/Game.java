@@ -42,7 +42,8 @@ public class Game {
 
 	    ArrayList<Monster> filtered = new ArrayList<>();
 
-	    for (Monster m : allMonsters) {
+	    for (int i = 0;i<allMonsters.size();i++){
+	    	Monster m = allMonsters.get(i);
 	        if (m.getRole() == role) {
 	            filtered.add(m);
 	        }
