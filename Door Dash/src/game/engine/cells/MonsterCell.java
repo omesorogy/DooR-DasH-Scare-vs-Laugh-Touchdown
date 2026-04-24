@@ -24,14 +24,14 @@ public class MonsterCell extends Cell{
 			//cell monster will have the same energy as the landing monster 
 			// and the shield of the landing monster is consumed
 			if (landingMonster.isShielded()){
-				cellMonster.setEnergy(landingMonster.getEnergy());
+				cellMonster.alterEnergy(landingMonster.getEnergy()-cellMonster.getEnergy());
 				landingMonster.setShielded(false);
 			}
 			//if not then we swap their energies
 			else{
 				int temp = cellMonster.getEnergy();
-				cellMonster.setEnergy(landingMonster.getEnergy());
-				landingMonster.setEnergy(temp);	
+				cellMonster.alterEnergy(landingMonster.getEnergy()-temp);
+				landingMonster.alterEnergy(temp-landingMonster.getEnergy());	
 			}
 		}
 	}

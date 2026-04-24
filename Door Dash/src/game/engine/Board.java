@@ -116,7 +116,7 @@ public class Board {
 		//Creating Monster Cells from the stationedMonsters and placing them 
 		for(int i = 0;i<Constants.MONSTER_CELL_INDICES.length;i++){
 			this.setCell(Constants.MONSTER_CELL_INDICES[i],
-							new MonsterCell("Monster Cell"+Constants.MONSTER_CELL_INDICES[i],
+							new MonsterCell(stationedMonsters.get(i).getName(),
 								stationedMonsters.get(i)));
 			stationedMonsters.get(i).setPosition(Constants.MONSTER_CELL_INDICES[i]);
 		}	
@@ -167,8 +167,10 @@ public class Board {
 			throw new InvalidMoveException();
 		}
 		else{
-			currentMonster.decrementConfusion();
-			opponentMonster.decrementConfusion();
+			if(currentMonster.isConfused()){
+				currentMonster.decrementConfusion();
+				opponentMonster.decrementConfusion();
+			}
 			this.updateMonsterPositions(currentMonster,opponentMonster);
 		}
 	}

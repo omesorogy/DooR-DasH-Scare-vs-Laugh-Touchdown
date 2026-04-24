@@ -10,7 +10,7 @@ public class Dynamo extends Monster {
 	public void executePowerupEffect(Monster opponentMonster) {
 		opponentMonster.setFrozen(true) ;
 	}
-	public int modifyInocomingEnergy(int energy) {
+	public int modifyIncomingEnergy(int energy) {
 		return energy*2 ;
 	}
 }

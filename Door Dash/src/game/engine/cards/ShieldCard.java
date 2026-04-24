@@ -1,7 +1,12 @@
 package game.engine.cards;
-
+import game.engine.monsters.*;
 public class ShieldCard extends Card {
 	public ShieldCard(String name, String description, int rarity){
 		super(name,description,rarity,true);
+	}
+	public void performAction(Monster player, Monster opponent){
+		//removes the opponent's shield and shields the player
+		player.setShielded(true);
+		opponent.setShielded(false);
 	}
 }
