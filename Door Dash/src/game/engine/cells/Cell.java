@@ -19,5 +19,11 @@ public class Cell {
 	public String getName() {
 		return name;
 	}
+	public boolean isOccupied(){
+		return monster!=null;
+	}
+	public void onLand(Monster landingMonster,Monster opponentMonster){
+		monster = landingMonster;
+	}
 	
 }

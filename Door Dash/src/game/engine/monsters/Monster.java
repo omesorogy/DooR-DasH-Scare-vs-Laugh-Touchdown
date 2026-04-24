@@ -4,10 +4,10 @@ import game.engine.Constants;
 import game.engine.Role ; // need sorogys enum
 
 public abstract class Monster implements Comparable<Monster> {
-	private String name ;
-	private String description ;
+	private final String name ;
+	private final String description ;
 	private Role role ;
-	private Role originalRole;
+	private final Role originalRole;
 	private int energy;
 	private int position;
 	private boolean frozen;
@@ -69,10 +69,7 @@ public abstract class Monster implements Comparable<Monster> {
 		this.energy = Math.max(0,energy) ;
 	}
 	public void setPosition(int position) {
-		if(position < 0)
-			this.position = 0;
-		else	
-			this.position = position%Constants.BOARD_SIZE;
+		this.position = position%Constants.BOARD_SIZE;
 	}
 	public void setFrozen(boolean frozen) {
 		this.frozen = frozen ;
