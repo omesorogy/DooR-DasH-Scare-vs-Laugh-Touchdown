@@ -7,7 +7,7 @@ import java.util.Random;
 import game.engine.exceptions.*;
 public class Game {
 	private Board board;
-	private ArrayList<Monster> allMonsters;
+	private ArrayList<Monster> allMonsters; //remaining monsters after removing player and opponent
 	private Monster player;
 	private Monster opponent;
 	private Monster current;
@@ -20,10 +20,11 @@ public class Game {
 	    Role opponentRole = (playerRole == Role.SCARER) ? Role.LAUGHER : Role.SCARER;
 	    this.opponent = selectRandomMonsterByRole(opponentRole);
 	    this.current = player;
-	    ArrayList<Monster> stationedMonsters=new ArrayList<Monster>(allMonsters);
-	    stationedMonsters.remove(player);
-	    stationedMonsters.remove(opponent);
-	    Board.setStationedMonsters(stationedMonsters);
+	    //ArrayList<Monster> stationedMonsters=new ArrayList<Monster>(allMonsters);
+	    //The test checks that that player and opponent are removed from the allMonsters also 
+	    allMonsters.remove(player);
+	    allMonsters.remove(opponent);
+	    Board.setStationedMonsters(allMonsters);
 	    board.initializeBoard(DataLoader.readCells());
 	    
 	}
@@ -56,6 +57,8 @@ public class Game {
 	    }
 
 	    Random rand = new Random();
+	    if(filtered.isEmpty())
+	    	return null;
 	    return filtered.get(rand.nextInt(filtered.size()));
 	}
 	private Monster getCurrentOpponent(){
@@ -113,6 +116,4 @@ public class Game {
 			winner=getCurrentOpponent();
 		return winner;
 	}
-	
-	
 }

@@ -114,7 +114,7 @@ public class Board {
 		}
 		
 		//Creating Monster Cells from the stationedMonsters and placing them 
-		for(int i = 0;i<Constants.MONSTER_CELL_INDICES.length;i++){
+		for(int i = 0;i<stationedMonsters.size();i++){
 			this.setCell(Constants.MONSTER_CELL_INDICES[i],
 							new MonsterCell(stationedMonsters.get(i).getName(),
 								stationedMonsters.get(i)));
