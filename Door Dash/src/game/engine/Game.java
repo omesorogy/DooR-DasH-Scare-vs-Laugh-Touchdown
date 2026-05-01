@@ -20,8 +20,6 @@ public class Game {
 	    Role opponentRole = (playerRole == Role.SCARER) ? Role.LAUGHER : Role.SCARER;
 	    this.opponent = selectRandomMonsterByRole(opponentRole);
 	    this.current = player;
-	    //ArrayList<Monster> stationedMonsters=new ArrayList<Monster>(allMonsters);
-	    //The test checks that that player and opponent are removed from the allMonsters also 
 	    allMonsters.remove(player);
 	    allMonsters.remove(opponent);
 	    Board.setStationedMonsters(allMonsters);
