@@ -82,8 +82,8 @@ public class Game {
 		if(currentEnergy<Constants.POWERUP_COST){
 			throw new OutOfEnergyException();
 		}
-		current.executePowerupEffect(getCurrentOpponent());
 		current.setEnergy(currentEnergy-Constants.POWERUP_COST);
+		current.executePowerupEffect(getCurrentOpponent());
 		
 	}
 	public void playTurn() throws InvalidMoveException{

@@ -157,17 +157,16 @@ public class Board {
 	{
 		//Save the current position in case of collision
 		int currentPreviousPosition = currentMonster.getPosition(); 
-		int opponentPreviousPosition = opponentMonster.getPosition(); 
+		boolean wasConfused=currentMonster.isConfused();//new addition
 		currentMonster.move(roll);
 		this.getCell(currentMonster.getPosition()).onLand(currentMonster, opponentMonster);
 		if(currentMonster.getPosition()==opponentMonster.getPosition()){
 			currentMonster.setPosition(currentPreviousPosition);
-			opponentMonster.setPosition(opponentPreviousPosition);
 			this.updateMonsterPositions(currentMonster,opponentMonster);
 			throw new InvalidMoveException();
 		}
 		else{
-			if(currentMonster.isConfused()){
+			if(wasConfused){
 				currentMonster.decrementConfusion();
 				opponentMonster.decrementConfusion();
 			}
