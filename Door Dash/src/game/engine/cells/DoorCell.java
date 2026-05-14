@@ -36,27 +36,28 @@ public class DoorCell extends Cell implements CanisterModifier{
 	}
 	public void onLand(Monster landingMonster, Monster opponentMonster){
 	    super.onLand(landingMonster, opponentMonster);
-	    //If the door is already activated, do nothing
 	    if(this.activated)
 	        return;
-	    
-	    Role landingMonsterRole = landingMonster.getRole(); //Store the role of the landing monster
+
+	    Role landingMonsterRole = landingMonster.getRole();
 	    ArrayList<Monster> stationedMonsters = Board.getStationedMonsters();
-	    //The energy is only modified either if the landing monster has the same role as the cell
-	    // or the landing monster is not shielded 
+
 	    if(landingMonsterRole == this.role || !landingMonster.isShielded()){
+		    int temp = landingMonster.getEnergy();
 		    this.modifyCanisterEnergy(landingMonster, this.energy);
-		    //Changes the energy of all stationed monsters with the same role as the landing one
+		    if(temp != landingMonster.getEnergy())
+		        this.activated = true;
+	
 		    for(int i = 0; i < stationedMonsters.size(); i++){
 		        Monster current = stationedMonsters.get(i);
 		        if(current.getRole() == landingMonsterRole){
+		            temp = current.getEnergy();
 		            this.modifyCanisterEnergy(current, this.energy);
+		            if(temp != current.getEnergy())
+		                this.activated = true;
 		        }
 		    }
-		    //Since the energy of the landing monster is changed then the cell is set to be activated
-		    this.activated = true;
 	    }
-	    //Otherwise only break the shield of the landing monster
 	    else{
 	    	this.modifyCanisterEnergy(landingMonster, this.energy);
 	    }

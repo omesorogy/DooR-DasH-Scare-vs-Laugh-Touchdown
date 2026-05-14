@@ -1,0 +1,796 @@
+package game.gui.controller;
+
+import game.engine.Role;
+import game.engine.monsters.*;
+import game.engine.cells.*;
+import game.gui.model.GameModel;
+import game.gui.view.*;
+import javafx.animation.*;
+import javafx.application.Platform;
+import javafx.geometry.*;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.effect.*;
+import javafx.scene.image.*;
+import javafx.scene.input.KeyCode;
+import javafx.scene.layout.*;
+import javafx.scene.paint.*;
+import javafx.scene.shape.*;
+import javafx.scene.text.*;
+import javafx.stage.*;
+import javafx.util.Duration;
+
+import java.io.InputStream;
+import java.util.ArrayDeque;
+import java.util.Deque;
+
+public class GameController {
+
+    private final Stage   mainStage;
+    private final Role    playerRole;
+    private final boolean multiplayer;
+    private GameModel model;
+
+    private BorderPane root;
+    private StackPane  rootStack;
+    private GameBoardView    boardView;
+    private MonsterInfoPanel playerPanel, opponentPanel;
+    private VBox leftBox, rightBox;
+    private TextArea eventLog;
+    private Label turnLabel, diceLabel, currentPlayerLabel;
+    private Button rollBtn, powerupBtn;
+
+    // In-scene overlays
+    private StackPane cardOverlay;
+    private StackPane shieldOverlay;
+    private boolean   waitingForOverlay = false;
+    private Runnable  afterOverlay      = null;
+
+    private Label lastCardBanner;
+
+    private int turnNumber = 1;
+    private final Deque<String> logLines = new ArrayDeque<>();
+
+    private static final double SIDE_FRAC = 0.16;
+    private static final double SIDE_MIN  = 190.0;
+
+    public GameController(Stage stage, Role role, boolean multiplayer) {
+        this.mainStage  = stage;
+        this.playerRole = role;
+        this.multiplayer = multiplayer;
+    }
+
+    // =========================================================================
+    //  STARTUP
+    // =========================================================================
+
+    public void startGame() {
+        try {
+            model = new GameModel(playerRole, multiplayer);
+        } catch (Exception e) {
+            safeMessageStage("Failed to Load Game",
+                "Could not load game data:\n" + e.getMessage(), "#3a0a0a", "#FF4444");
+            return;
+        }
+        buildUI();
+        refreshAll();
+    }
+
+    // =========================================================================
+    //  UI CONSTRUCTION
+    // =========================================================================
+
+    private void buildUI() {
+        root = new BorderPane();
+        root.setStyle("-fx-background-color: #0a0a14;");
+        root.setTop(buildTopBar());
+
+        // LEFT
+        playerPanel = new MonsterInfoPanel(true);
+        leftBox = new VBox(8, buildActionsPanel(), playerPanel);
+        leftBox.setPadding(new Insets(8));
+        leftBox.setStyle("-fx-background-color: #0d0d1f;");
+        leftBox.setMinWidth(SIDE_MIN);
+        leftBox.setMaxWidth(260);
+        VBox.setVgrow(playerPanel, Priority.ALWAYS);
+        root.setLeft(leftBox);
+
+        // CENTER
+        boardView = new GameBoardView(model);
+        boardView.setStyle("-fx-background-color: #07070f;");
+
+        lastCardBanner = new Label("");
+        lastCardBanner.setFont(Font.font("Georgia", FontWeight.BOLD, 13));
+        lastCardBanner.setTextFill(Color.web("#FFD700"));
+        lastCardBanner.setWrapText(true);
+        lastCardBanner.setMaxWidth(Double.MAX_VALUE);
+        lastCardBanner.setAlignment(Pos.CENTER);
+        lastCardBanner.setTextAlignment(TextAlignment.CENTER);
+        lastCardBanner.setStyle("-fx-background-color: #1a0a2e; -fx-padding: 4 12 4 12;");
+        lastCardBanner.setVisible(false);
+
+        VBox centerBox = new VBox(0, boardView, lastCardBanner);
+        VBox.setVgrow(boardView, Priority.ALWAYS);
+        centerBox.setStyle("-fx-background-color: #07070f;");
+        root.setCenter(centerBox);
+
+        // RIGHT
+        opponentPanel = new MonsterInfoPanel(false);
+        VBox logPanel = buildLogPanel();
+        rightBox = new VBox(8, opponentPanel, buildLegendPanel(), logPanel);
+        rightBox.setPadding(new Insets(8));
+        rightBox.setStyle("-fx-background-color: #0d0d1f;");
+        rightBox.setMinWidth(SIDE_MIN);
+        rightBox.setMaxWidth(260);
+        VBox.setVgrow(logPanel, Priority.ALWAYS);
+        root.setRight(rightBox);
+
+        // Overlays
+        cardOverlay   = buildCardOverlay();
+        shieldOverlay = buildShieldOverlay();
+        cardOverlay.setVisible(false);
+        shieldOverlay.setVisible(false);
+
+        rootStack = new StackPane(root, shieldOverlay, cardOverlay);
+
+        Scene scene = new Scene(rootStack);
+        mainStage.setScene(scene);
+        mainStage.setTitle("DooR DasH: Scare vs Laugh Touchdown");
+
+        scene.widthProperty().addListener((obs, ov, nv) -> {
+            double sw    = nv.doubleValue();
+            double sideW = Math.max(SIDE_MIN, Math.min(260, sw * SIDE_FRAC));
+            leftBox.setPrefWidth(sideW);
+            rightBox.setPrefWidth(sideW);
+        });
+
+        mainStage.setResizable(true);
+        mainStage.setMaximized(true);
+        mainStage.setFullScreen(true);
+        mainStage.setFullScreenExitHint("Press F11 to toggle fullscreen.");
+        mainStage.show();
+
+        scene.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.F11)
+                mainStage.setFullScreen(!mainStage.isFullScreen());
+        });
+
+        Platform.runLater(() -> {
+            double sw    = scene.getWidth();
+            double sideW = Math.max(SIDE_MIN, Math.min(260, sw * SIDE_FRAC));
+            leftBox.setPrefWidth(sideW);
+            rightBox.setPrefWidth(sideW);
+        });
+    }
+
+    // =========================================================================
+    //  TOP BAR
+    // =========================================================================
+
+    private HBox buildTopBar() {
+        HBox bar = new HBox(14);
+        bar.setPadding(new Insets(7, 14, 7, 14));
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setStyle(
+            "-fx-background-color: linear-gradient(to right, #1a0a2e, #0a1f0a, #1a0a2e);" +
+            "-fx-border-color: #333366; -fx-border-width: 0 0 2 0;");
+
+        Text title = new Text("DooR DasH: Scare vs Laugh Touchdown");
+        title.setFont(Font.font("Impact", 19));
+        title.setFill(Color.web("#FFD700"));
+        title.setEffect(new Glow(0.4));
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        currentPlayerLabel = new Label("");
+        currentPlayerLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 12));
+        currentPlayerLabel.setTextFill(Color.web("#00FF88"));
+
+        turnLabel = new Label("Turn 1");
+        turnLabel.setFont(Font.font("Impact", 15));
+        turnLabel.setTextFill(Color.web("#AAAAFF"));
+
+        diceLabel = new Label("Dice: --");
+        diceLabel.setFont(Font.font("Impact", 17));
+        diceLabel.setTextFill(Color.WHITE);
+
+        bar.getChildren().addAll(title, spacer, currentPlayerLabel, turnLabel, diceLabel);
+        return bar;
+    }
+
+    // =========================================================================
+    //  ACTION PANELS
+    // =========================================================================
+
+    private VBox buildActionsPanel() {
+        VBox panel = new VBox(8);
+        panel.setPadding(new Insets(10));
+        panel.setMaxWidth(Double.MAX_VALUE);
+        panel.setStyle(
+            "-fx-background-color: #111128;" +
+            "-fx-border-color: #333366;" +
+            "-fx-border-width: 2;" +
+            "-fx-border-radius: 10;" +
+            "-fx-background-radius: 10;");
+
+        Label header = new Label("Actions");
+        header.setFont(Font.font("Impact", 15));
+        header.setTextFill(Color.web("#FFD700"));
+
+        powerupBtn = new Button("Activate Powerup\n(costs 500 energy)");
+        powerupBtn.setMaxWidth(Double.MAX_VALUE);
+        powerupBtn.setPrefHeight(48);
+        powerupBtn.setFont(Font.font("Georgia", FontWeight.BOLD, 11));
+        powerupBtn.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, #6600AA, #440077);" +
+            "-fx-text-fill: white; -fx-background-radius: 10; -fx-cursor: hand;");
+        powerupBtn.setOnAction(e -> handlePowerup());
+
+        rollBtn = new Button("Roll Dice");
+        rollBtn.setMaxWidth(Double.MAX_VALUE);
+        rollBtn.setPrefHeight(48);
+        rollBtn.setFont(Font.font("Impact", 17));
+        rollBtn.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, #00AA44, #006622);" +
+            "-fx-text-fill: white; -fx-background-radius: 10; -fx-cursor: hand;");
+        rollBtn.setOnAction(e -> handleRoll());
+
+        panel.getChildren().addAll(header, powerupBtn, rollBtn);
+        return panel;
+    }
+
+    private VBox buildLegendPanel() {
+        VBox panel = new VBox(3);
+        panel.setPadding(new Insets(7));
+        panel.setMaxWidth(Double.MAX_VALUE);
+        panel.setStyle(
+            "-fx-background-color: #111128; -fx-border-color: #333366;" +
+            "-fx-border-width: 1; -fx-border-radius: 8; -fx-background-radius: 8;");
+
+        Label title = new Label("Legend");
+        title.setFont(Font.font("Impact", 12));
+        title.setTextFill(Color.web("#FFD700"));
+        panel.getChildren().add(title);
+
+        panel.getChildren().addAll(
+            legendRow("#4A1080", "Scarer Door"),
+            legendRow("#0A5C28", "Laugher Door"),
+            legendRow("#000000", "Used Door (Black)"),
+            legendRow("#0A2A5C", "Monster Cell"),
+            legendRow("#7A0000", "Card Cell"),
+            legendRow("#006080", "Conveyor Belt"),
+            legendRow("#C04000", "Contamination Sock"),
+            legendRow("#003830", "Start"),
+            legendRow("#6B4A00", "Boo's Door (Win)"),
+            legendRow("#1A1A30", "Normal Cell")
+        );
+        return panel;
+    }
+
+    private HBox legendRow(String color, String label) {
+        HBox row = new HBox(5);
+        row.setAlignment(Pos.CENTER_LEFT);
+        Rectangle rect = new Rectangle(11, 11, Color.web(color));
+        rect.setArcWidth(3); rect.setArcHeight(3);
+        rect.setStroke(Color.web("#666688")); rect.setStrokeWidth(0.5);
+        Label lbl = new Label(label);
+        lbl.setFont(Font.font("Georgia", 9));
+        lbl.setTextFill(Color.web("#CCCCCC"));
+        row.getChildren().addAll(rect, lbl);
+        return row;
+    }
+
+    private VBox buildLogPanel() {
+        VBox panel = new VBox(4);
+        panel.setPadding(new Insets(7));
+        VBox.setVgrow(panel, Priority.ALWAYS);
+
+        Label title = new Label("Event Log");
+        title.setFont(Font.font("Impact", 12));
+        title.setTextFill(Color.web("#FFD700"));
+
+        eventLog = new TextArea();
+        eventLog.setEditable(false);
+        eventLog.setWrapText(true);
+        eventLog.setStyle(
+            "-fx-control-inner-background: #080818;" +
+            "-fx-text-fill: #AADDFF;" +
+            "-fx-font-family: Consolas;" +
+            "-fx-font-size: 10;" +
+            "-fx-border-color: #333366;");
+        VBox.setVgrow(eventLog, Priority.ALWAYS);
+
+        panel.getChildren().addAll(title, eventLog);
+        return panel;
+    }
+
+    // =========================================================================
+    //  CARD OVERLAY  (in-scene, animated, with card image)
+    // =========================================================================
+
+    private StackPane buildCardOverlay() {
+        StackPane overlay = new StackPane();
+        overlay.setStyle("-fx-background-color: rgba(0,0,0,0.88);");
+        overlay.setPickOnBounds(true);
+
+        // Full-screen layout
+        VBox card = new VBox(20);
+        card.setAlignment(Pos.CENTER);
+        card.setPadding(new Insets(40));
+        card.setMaxWidth(Double.MAX_VALUE);
+        card.setMaxHeight(Double.MAX_VALUE);
+        card.setPrefWidth(Double.MAX_VALUE);
+        card.setPrefHeight(Double.MAX_VALUE);
+        card.setStyle("-fx-background-color: transparent;");
+
+        Label header = new Label("CARD DRAWN!");
+        header.setFont(Font.font("Impact", 28));
+        header.setTextFill(Color.web("#FF8844"));
+        header.setEffect(new Glow(0.5));
+
+        // Large card image
+        ImageView cardImg = new ImageView();
+        cardImg.setId("ov-img");
+        cardImg.setFitWidth(800);
+        cardImg.setFitHeight(800);
+        cardImg.setPreserveRatio(true);
+        cardImg.setSmooth(true);
+        cardImg.setEffect(new DropShadow(60, Color.web("#FFD700", 0.8)));
+
+        Label cardName = new Label();
+        cardName.setId("ov-name");
+        cardName.setFont(Font.font("Impact", 36));
+        cardName.setTextFill(Color.web("#FFD700"));
+        cardName.setEffect(new Glow(0.6));
+        cardName.setWrapText(true);
+        cardName.setAlignment(Pos.CENTER);
+        cardName.setTextAlignment(TextAlignment.CENTER);
+
+        Label effectLbl = new Label();
+        effectLbl.setId("ov-effect");
+        effectLbl.setFont(Font.font("Georgia", FontWeight.BOLD, 18));
+        effectLbl.setTextFill(Color.web("#CCDDFF"));
+        effectLbl.setWrapText(true);
+        effectLbl.setAlignment(Pos.CENTER);
+        effectLbl.setTextAlignment(TextAlignment.CENTER);
+
+        Button dismissBtn = new Button("OK - Got it!");
+        dismissBtn.setFont(Font.font("Impact", 22));
+        dismissBtn.setPrefSize(220, 56);
+        dismissBtn.setDefaultButton(true);
+        dismissBtn.setStyle(
+            "-fx-background-color: linear-gradient(to right, #FFD700, #FF8C00);" +
+            "-fx-text-fill: #1a1a1a;" +
+            "-fx-background-radius: 28;" +
+            "-fx-cursor: hand;");
+        dismissBtn.setOnAction(e -> dismissOverlay(cardOverlay));
+
+        card.getChildren().addAll(header, cardImg, cardName, effectLbl, dismissBtn);
+        overlay.getChildren().add(card);
+        overlay.setUserData(card);
+        return overlay;
+    }
+
+    // =========================================================================
+    //  SHIELD BREAK OVERLAY
+    // =========================================================================
+
+    private StackPane buildShieldOverlay() {
+        StackPane overlay = new StackPane();
+        overlay.setStyle("-fx-background-color: rgba(0,0,0,0.88);");
+        overlay.setPickOnBounds(true);
+
+        // Full-screen layout matching card overlay
+        VBox card = new VBox(20);
+        card.setAlignment(Pos.CENTER);
+        card.setPadding(new Insets(40));
+        card.setMaxWidth(Double.MAX_VALUE);
+        card.setMaxHeight(Double.MAX_VALUE);
+        card.setPrefWidth(Double.MAX_VALUE);
+        card.setPrefHeight(Double.MAX_VALUE);
+        card.setStyle("-fx-background-color: transparent;");
+
+        Label header = new Label("SHIELD SHATTERED!");
+        header.setFont(Font.font("Impact", 28));
+        header.setTextFill(Color.web("#FFFFFF"));
+        header.setEffect(new Glow(0.5));
+
+        // Large broken shield image
+        ImageView shieldImg = new ImageView();
+        shieldImg.setFitWidth(800);
+        shieldImg.setFitHeight(800);
+        shieldImg.setPreserveRatio(true);
+        shieldImg.setSmooth(true);
+        shieldImg.setEffect(new DropShadow(60, Color.web("#FFFFFF", 0.8)));
+        // Load broken_shield image
+        try {
+            InputStream is = getClass().getResourceAsStream("/game/gui/resources/images/broken_shield.jpg");
+            if (is != null) {
+                Image img = new Image(is);
+                if (!img.isError()) shieldImg.setImage(img);
+            }
+        } catch (Exception ignored) {}
+
+        Label sub = new Label();
+        sub.setId("sh-msg");
+        sub.setFont(Font.font("Georgia", FontWeight.BOLD, 18));
+        sub.setTextFill(Color.web("#CCDDFF"));
+        sub.setWrapText(true);
+        sub.setAlignment(Pos.CENTER);
+        sub.setTextAlignment(TextAlignment.CENTER);
+
+        Button ok = new Button("OK - Got it!");
+        ok.setFont(Font.font("Impact", 22));
+        ok.setPrefSize(220, 56);
+        ok.setDefaultButton(true);
+        ok.setStyle(
+            "-fx-background-color: linear-gradient(to right, #FFFFFF, #CCCCCC);" +
+            "-fx-text-fill: #1a1a1a;" +
+            "-fx-background-radius: 28;" +
+            "-fx-cursor: hand;");
+        ok.setOnAction(e -> dismissOverlay(shieldOverlay));
+
+        card.getChildren().addAll(header, shieldImg, sub, ok);
+        overlay.getChildren().add(card);
+        overlay.setUserData(card);
+        return overlay;
+    }
+
+    // ---- Show / dismiss overlays ----
+
+    private void showCardOverlay(String name, String type, String effect, String imgKey, Runnable onDismiss) {
+        Label nameL   = (Label) cardOverlay.lookup("#ov-name");
+        Label effectL = (Label) cardOverlay.lookup("#ov-effect");
+        ImageView imgV = (ImageView) cardOverlay.lookup("#ov-img");
+
+        if (nameL   != null) nameL.setText(name);
+        if (effectL != null) effectL.setText(effect);
+        if (imgV    != null) {
+            Image img = boardView.getCardImage(name);
+            if (img != null) { imgV.setImage(img); imgV.setVisible(true); }
+            else              { imgV.setVisible(false); }
+        }
+
+        animateOverlayIn(cardOverlay, onDismiss);
+    }
+
+    public void showShieldBreak(String monsterName, Runnable onDismiss) {
+        Label sub = (Label) shieldOverlay.lookup("#sh-msg");
+        if (sub != null)
+            sub.setText(monsterName + "'s shield absorbed the hit and shattered into pieces!");
+        animateOverlayIn(shieldOverlay, onDismiss);
+    }
+
+    private void animateOverlayIn(StackPane overlay, Runnable onDismiss) {
+        afterOverlay      = onDismiss;
+        waitingForOverlay = true;
+        overlay.setVisible(true);
+
+        VBox card = (VBox) overlay.getUserData();
+        card.setScaleX(0.3); card.setScaleY(0.3); card.setOpacity(0.0);
+        ScaleTransition st = new ScaleTransition(Duration.millis(250), card);
+        st.setToX(1.0); st.setToY(1.0);
+        FadeTransition ft = new FadeTransition(Duration.millis(250), card);
+        ft.setToValue(1.0);
+        new ParallelTransition(st, ft).play();
+    }
+
+    private void dismissOverlay(StackPane overlay) {
+        if (!waitingForOverlay) return;
+        waitingForOverlay = false;
+        VBox card = (VBox) overlay.getUserData();
+        ScaleTransition st = new ScaleTransition(Duration.millis(180), card);
+        st.setToX(0.3); st.setToY(0.3);
+        FadeTransition ft = new FadeTransition(Duration.millis(180), card);
+        ft.setToValue(0.0);
+        ParallelTransition pt = new ParallelTransition(st, ft);
+        pt.setOnFinished(e -> {
+            overlay.setVisible(false);
+            Runnable cb = afterOverlay;
+            afterOverlay = null;
+            if (cb != null) cb.run();
+        });
+        pt.play();
+    }
+
+    // =========================================================================
+    //  ACTION HANDLERS
+    // =========================================================================
+
+    private void handlePowerup() {
+        if (waitingForOverlay) return;
+        String err = model.usePowerup();
+        if (err != null) {
+            safeMessageStage("Powerup Failed", err, "#3a1a0a", "#FFB300");
+        } else {
+            addLog("POWERUP: " + model.getCurrent().getName() + " activated their powerup!");
+            refreshAll();
+        }
+    }
+
+    private void handleRoll() {
+        if (waitingForOverlay) return;
+        setButtonsEnabled(false);
+
+        // Track shield status before turn
+        boolean playerShieldBefore   = model.getPlayer().isShielded();
+        boolean opponentShieldBefore = model.getOpponent().isShielded();
+
+        String result;
+        try { result = model.playTurn(); }
+        catch (Exception ex) {
+            safeMessageStage("Engine Error", ex.getClass().getSimpleName() + ": " + ex.getMessage(), "#3a0a0a", "#FF4444");
+            setButtonsEnabled(true);
+            return;
+        }
+
+        if ("FROZEN".equals(result)) {
+            String msg = model.getCurrent().getName() + " is FROZEN and skips their turn!";
+            addLog("FROZEN: " + msg);
+            diceLabel.setText("Dice: FROZEN");
+            refreshAll();
+            setButtonsEnabled(true);
+            checkWin();
+            return;
+        }
+        if ("INVALID".equals(result)) {
+            addLog("INVALID: Cell occupied - roll again.");
+            safeMessageStage("Invalid Move", "That cell is occupied by the opponent!\nPlease roll again.", "#3a2a0a", "#FFB300");
+            setButtonsEnabled(true);
+            return;
+        }
+
+        int roll = model.getLastDiceRoll();
+        animateDice(roll, () -> {
+            addLog(model.getLastLogEntry());
+
+            // Check if shield was broken this turn
+            boolean playerShieldBroken   = playerShieldBefore   && !model.getPlayer().isShielded();
+            boolean opponentShieldBroken = opponentShieldBefore && !model.getOpponent().isShielded();
+            String shieldBrokenName = playerShieldBroken
+                ? model.getPlayer().getName()
+                : (opponentShieldBroken ? model.getOpponent().getName() : null);
+
+            boolean hasCard = !model.getLastCardDrawn().isEmpty();
+
+            Runnable afterCard = () -> {
+                if (shieldBrokenName != null) {
+                    addLog("SHIELD BREAK: " + shieldBrokenName + "'s shield was shattered!");
+                    showShieldBreak(shieldBrokenName, this::finishTurn);
+                } else {
+                    finishTurn();
+                }
+            };
+
+            if (hasCard) {
+                String cn = model.getLastCardDrawn();
+                String ct = model.getLastCardType();
+                String ce = model.getLastCardEffect();
+                addLog("CARD: " + cn + " (" + ct + "): " + ce);
+                updateLastCardBanner(cn, ct, ce);
+                showCardOverlay(cn, ct, ce, cn, afterCard);
+            } else {
+                afterCard.run();
+            }
+        });
+    }
+
+    private void finishTurn() {
+        turnNumber++;
+        turnLabel.setText("Turn " + turnNumber);
+        refreshAll();
+        setButtonsEnabled(true);
+        checkWin();
+
+        if (!multiplayer && model.getCurrent() == model.getOpponent()) {
+            setButtonsEnabled(false);
+            PauseTransition botDelay = new PauseTransition(Duration.seconds(1.0));
+            botDelay.setOnFinished(ev -> playBotTurn());
+            botDelay.play();
+        }
+    }
+
+    private void playBotTurn() {
+        boolean playerShieldBefore   = model.getPlayer().isShielded();
+        boolean opponentShieldBefore = model.getOpponent().isShielded();
+
+        String result;
+        try { result = model.playTurn(); }
+        catch (Exception ex) {
+            safeMessageStage("Bot Error", ex.getMessage(), "#3a0a0a", "#FF4444");
+            setButtonsEnabled(true);
+            return;
+        }
+
+        if ("FROZEN".equals(result)) {
+            addLog("FROZEN: Bot (" + model.getOpponent().getName() + ") skips turn.");
+            diceLabel.setText("Dice: FROZEN");
+            finishBotTurn(playerShieldBefore, opponentShieldBefore);
+            return;
+        }
+        if ("INVALID".equals(result)) {
+            addLog("BOT-RETRY: re-rolling...");
+            PauseTransition retryDelay = new PauseTransition(Duration.millis(400));
+            retryDelay.setOnFinished(e -> playBotTurn());
+            retryDelay.play();
+            return;
+        }
+
+        diceLabel.setText("Dice: " + model.getLastDiceRoll());
+        addLog("BOT: " + model.getLastLogEntry());
+
+        boolean hasCard = !model.getLastCardDrawn().isEmpty();
+        boolean playerShieldBroken   = playerShieldBefore   && !model.getPlayer().isShielded();
+        boolean opponentShieldBroken = opponentShieldBefore && !model.getOpponent().isShielded();
+        String shieldBrokenName = playerShieldBroken
+            ? model.getPlayer().getName()
+            : (opponentShieldBroken ? model.getOpponent().getName() : null);
+
+        Runnable afterCard = () -> {
+            if (shieldBrokenName != null) {
+                addLog("SHIELD BREAK: " + shieldBrokenName + "'s shield was shattered!");
+                showShieldBreak(shieldBrokenName, () -> finishBotTurn(false, false));
+            } else {
+                finishBotTurn(false, false);
+            }
+        };
+
+        if (hasCard) {
+            String cn = model.getLastCardDrawn();
+            String ct = model.getLastCardType();
+            String ce = model.getLastCardEffect();
+            addLog("BOT-CARD: " + cn + " (" + ct + "): " + ce);
+            updateLastCardBanner(cn, ct, ce);
+            showCardOverlay("[BOT] " + cn, ct, ce, cn, afterCard);
+        } else {
+            afterCard.run();
+        }
+    }
+
+    private void finishBotTurn(boolean ps, boolean os) {
+        turnNumber++;
+        turnLabel.setText("Turn " + turnNumber);
+        refreshAll();
+        setButtonsEnabled(true);
+        checkWin();
+    }
+
+    private void checkWin() {
+        Monster winner = model.getWinner();
+        if (winner != null) {
+            Monster loser     = (winner == model.getPlayer()) ? model.getOpponent() : model.getPlayer();
+            boolean playerWon = (winner == model.getPlayer());
+            addLog("WIN: " + winner.getName() + " wins with " + winner.getEnergy() + " energy!");
+            PauseTransition winDelay = new PauseTransition(Duration.millis(400));
+            winDelay.setOnFinished(e -> new WinScreenView(mainStage, winner, loser, playerWon).show());
+            winDelay.play();
+        }
+    }
+
+    // =========================================================================
+    //  REFRESH
+    // =========================================================================
+
+    private void refreshAll() {
+        Monster current  = model.getCurrent();
+        Monster player   = model.getPlayer();
+        Monster opponent = model.getOpponent();
+        playerPanel.update(player,   current == player);
+        opponentPanel.update(opponent, current == opponent);
+        boardView.refresh();
+
+        boolean playerTurn = (current == player);
+        String who = multiplayer
+            ? (playerTurn ? "P1 Turn: " + player.getName() : "P2 Turn: " + opponent.getName())
+            : (playerTurn ? "Your Turn" : "Bot's Turn");
+        currentPlayerLabel.setText(who);
+        currentPlayerLabel.setTextFill(playerTurn ? Color.web("#00FF88") : Color.web("#FF6622"));
+    }
+
+    // =========================================================================
+    //  HELPERS
+    // =========================================================================
+
+    private void addLog(String line) {
+        logLines.addFirst("[T" + turnNumber + "] " + line);
+        if (logLines.size() > 120) logLines.removeLast();
+        StringBuilder sb = new StringBuilder();
+        logLines.forEach(l -> sb.append(l).append("\n"));
+        eventLog.setText(sb.toString());
+        eventLog.positionCaret(0);
+    }
+
+    private void setButtonsEnabled(boolean enabled) {
+        boolean ok = enabled && !waitingForOverlay;
+        rollBtn.setDisable(!ok);
+        powerupBtn.setDisable(!ok);
+    }
+
+    private void updateLastCardBanner(String name, String type, String effect) {
+        lastCardBanner.setText("Last Card: " + name + " (" + type + ")  --  " + effect);
+        lastCardBanner.setOpacity(1.0);
+        lastCardBanner.setVisible(true);
+        FadeTransition fade = new FadeTransition(Duration.seconds(10), lastCardBanner);
+        fade.setFromValue(1.0); fade.setToValue(0.3); fade.play();
+    }
+
+    private void animateDice(int roll, Runnable onFinish) {
+        Timeline tl = new Timeline();
+        for (int i = 0; i < 8; i++) {
+            final int f = i;
+            tl.getKeyFrames().add(new KeyFrame(Duration.millis(f * 70),
+                e -> diceLabel.setText("Dice: " + (1 + (f % 6)))));
+        }
+        tl.getKeyFrames().add(new KeyFrame(Duration.millis(600),
+            e -> diceLabel.setText("Dice: " + roll)));
+        tl.setOnFinished(e -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(220), diceLabel);
+            st.setFromX(1); st.setToX(1.4); st.setFromY(1); st.setToY(1.4);
+            st.setAutoReverse(true); st.setCycleCount(2);
+            st.setOnFinished(ev -> onFinish.run());
+            st.play();
+        });
+        tl.play();
+    }
+
+    private ImageView loadIconImage(String key, double size) {
+        String[] exts = {".png", ".jpg", ".jpeg"};
+        for (String ext : exts) {
+            try {
+                InputStream is = getClass().getResourceAsStream(
+                    "/game/gui/resources/images/" + key + ext);
+                if (is != null) {
+                    Image img = new Image(is);
+                    if (!img.isError()) {
+                        ImageView iv = new ImageView(img);
+                        iv.setFitWidth(size); iv.setFitHeight(size);
+                        iv.setPreserveRatio(true); iv.setSmooth(true);
+                        return iv;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    private void safeMessageStage(String title, String message, String bgColor, String accent) {
+        Stage popup = new Stage();
+        popup.initModality(Modality.APPLICATION_MODAL);
+        popup.initOwner(mainStage);
+        popup.setTitle(title);
+        popup.setResizable(false);
+
+        VBox content = new VBox(14);
+        content.setAlignment(Pos.CENTER);
+        content.setPadding(new Insets(28, 36, 28, 36));
+        content.setPrefWidth(420);
+        content.setStyle(
+            "-fx-background-color: " + bgColor + ";" +
+            "-fx-border-color: " + accent + ";" +
+            "-fx-border-width: 2;" +
+            "-fx-border-radius: 12;" +
+            "-fx-background-radius: 12;");
+
+        Label titleLbl = new Label(title);
+        titleLbl.setFont(Font.font("Impact", 20));
+        titleLbl.setTextFill(Color.web(accent));
+
+        Label msgLbl = new Label(message);
+        msgLbl.setFont(Font.font("Georgia", 14));
+        msgLbl.setTextFill(Color.WHITE);
+        msgLbl.setWrapText(true); msgLbl.setMaxWidth(360);
+        msgLbl.setAlignment(Pos.CENTER); msgLbl.setTextAlignment(TextAlignment.CENTER);
+
+        Button okBtn = new Button("OK");
+        okBtn.setFont(Font.font("Impact", 16)); okBtn.setPrefSize(110, 38);
+        okBtn.setDefaultButton(true);
+        okBtn.setStyle("-fx-background-color:" + accent + ";-fx-text-fill:#1a1a1a;" +
+                       "-fx-background-radius:20;-fx-cursor:hand;");
+        okBtn.setOnAction(e -> popup.close());
+
+        content.getChildren().addAll(titleLbl, msgLbl, okBtn);
+        popup.setScene(new Scene(content));
+        popup.showAndWait();
+    }
+}

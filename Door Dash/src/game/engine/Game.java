@@ -11,6 +11,11 @@ public class Game {
 	private Monster player;
 	private Monster opponent;
 	private Monster current;
+	private int lastDiceRoll = 0;
+	
+	public int getLastDiceRoll() { return lastDiceRoll; }
+	public game.engine.cards.Card getLastDrawnCard() { return Board.getLastDrawnCard(); }
+	public void resetLastDrawnCard() { Board.resetLastDrawnCard(); }
 	
 	public Game(Role playerRole) throws IOException{
 		
@@ -20,6 +25,8 @@ public class Game {
 	    Role opponentRole = (playerRole == Role.SCARER) ? Role.LAUGHER : Role.SCARER;
 	    this.opponent = selectRandomMonsterByRole(opponentRole);
 	    this.current = player;
+	    //ArrayList<Monster> stationedMonsters=new ArrayList<Monster>(allMonsters);
+	    //The test checks that that player and opponent are removed from the allMonsters also 
 	    allMonsters.remove(player);
 	    allMonsters.remove(opponent);
 	    Board.setStationedMonsters(allMonsters);
@@ -91,7 +98,8 @@ public class Game {
 			switchTurn();
 			return;
 		}
-		board.moveMonster(current,rollDice(),getCurrentOpponent());
+		lastDiceRoll = rollDice();
+		board.moveMonster(current, lastDiceRoll, getCurrentOpponent());
 		switchTurn();
 		
 	}

@@ -148,8 +148,14 @@ public class Board {
 		if(cards.size()==0){
 			reloadCards();
 		}
-		return cards.remove(0);
+		Card drawn = cards.remove(0);
+		lastDrawnCard = drawn;
+		return drawn;
 	}
+
+	public static void resetLastDrawnCard() { lastDrawnCard = null; }
+	private static Card lastDrawnCard = null;
+	public static Card getLastDrawnCard() { return lastDrawnCard; }
 	
 	//Makes a valid move for the current monster
 	public void moveMonster(Monster currentMonster, 
@@ -157,10 +163,9 @@ public class Board {
 	{
 		//Save the current position in case of collision
 		int currentPreviousPosition = currentMonster.getPosition(); 
-		boolean wasConfused=currentMonster.isConfused();//Store the confusion state before moving
+		boolean wasConfused=currentMonster.isConfused();//new addition
 		currentMonster.move(roll);
 		this.getCell(currentMonster.getPosition()).onLand(currentMonster, opponentMonster);
-		//if collision occurs revert back to the previous position and throw an exception
 		if(currentMonster.getPosition()==opponentMonster.getPosition()){
 			currentMonster.setPosition(currentPreviousPosition);
 			this.updateMonsterPositions(currentMonster,opponentMonster);
