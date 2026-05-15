@@ -146,7 +146,7 @@ public class WinScreenView {
         energy.setFont(Font.font("Georgia", FontWeight.BOLD, 16));
         energy.setTextFill(Color.web("#FFD700"));
 
-        Label pos = new Label("Cell " + (m.getPosition() + 1));
+        Label pos = new Label("Cell " + m.getPosition());
         pos.setFont(Font.font("Georgia", 13));
         pos.setTextFill(Color.web("#AAAAFF"));
 
@@ -158,7 +158,7 @@ public class WinScreenView {
     private String monsterKey(Monster m) {
         if (m == null) return null;
         String n = m.getName().toLowerCase();
-        if (n.contains("sullivan") || n.contains("sulley")) return "sulley";
+        if (n.contains("sullivan") || n.contains("sulley")) return "sullivan";
         if (n.contains("wazowski") || n.contains("mike"))   return "mike";
         if (n.contains("randall"))                          return "randall";
         if (n.contains("celia"))                            return "celia";

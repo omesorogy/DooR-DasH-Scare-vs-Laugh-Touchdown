@@ -1,8 +1,8 @@
 package game.gui.view;
 
 import game.engine.Role;
-import game.engine.cells.*;
 import game.engine.cells.Cell;
+import game.engine.cells.*;
 import game.engine.monsters.*;
 import game.gui.model.GameModel;
 import javafx.animation.*;
@@ -173,7 +173,7 @@ public class GameBoardView extends Region {
         Monster player   = model.getPlayer();
         Monster opponent = model.getOpponent();
 
-        int fIdx  = Math.max(10, cs / 6);   // index font — always readable
+        int fIdx  = Math.max(10, cs / 6);   // index font - always readable
         int fSml  = Math.max(9,  cs / 8);   // small label font
         int imgSz = Math.max(20, (int)(cs * 0.52));
         int tokR  = Math.max(10, cs / 5);
@@ -198,7 +198,7 @@ public class GameBoardView extends Region {
                 // 2. Cell image (non-door cells only, full opacity)
                 addCellImage(pane, cell, idx, imgSz, exhausted);
 
-                // 3. Overlay group — all text drawn with absolute pixel positions
+                // 3. Overlay group - all text drawn with absolute pixel positions
                 //    so layout manager can never interfere
                 javafx.scene.Group overlay = new javafx.scene.Group();
 
@@ -352,7 +352,7 @@ public class GameBoardView extends Region {
     private void addTokens(StackPane pane, Monster player, Monster opponent,
                             boolean playerHere, boolean opponentHere, int tokR) {
         if (playerHere && opponentHere) {
-            // Both on same cell — offset them
+            // Both on same cell - offset them
             StackPane pt = buildToken(player, true,  tokR);
             StackPane ot = buildToken(opponent, false, tokR);
             pt.setTranslateX(-tokR * 0.8);

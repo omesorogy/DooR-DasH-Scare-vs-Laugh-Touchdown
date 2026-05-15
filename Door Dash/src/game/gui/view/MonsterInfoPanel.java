@@ -123,7 +123,7 @@ public class MonsterInfoPanel extends VBox {
         energyBar.setStyle("-fx-accent:" + (isPlayer ? "#00cc44" : "#ff4400") + ";");
 
         // Position
-        posLabel = styled("Cell: 1", 11, Color.web("#88AAFF"), false);
+        posLabel = styled("Cell: 0", 11, Color.web("#88AAFF"), false);
 
         // Status effects
         statusLabel = styled("Status: None", 11, Color.web("#FF8844"), false);
@@ -199,7 +199,7 @@ public class MonsterInfoPanel extends VBox {
         else if (energy >= 500)  energyBar.setStyle("-fx-accent:" + (isPlayer ? "#00cc44" : "#ff4400") + ";");
         else                     energyBar.setStyle("-fx-accent:#cc2200;");
 
-        posLabel.setText("Cell: " + (m.getPosition() + 1));
+        posLabel.setText("Cell: " + m.getPosition());
 
         // Status effects
         StringBuilder sb = new StringBuilder("Status: ");
@@ -259,7 +259,7 @@ public class MonsterInfoPanel extends VBox {
     private String monsterKey(Monster m) {
         if (m == null) return null;
         String n = m.getName().toLowerCase();
-        if (n.contains("sullivan") || n.contains("sulley")) return "sulley";
+        if (n.contains("sullivan") || n.contains("sulley")) return "sullivan";
         if (n.contains("wazowski") || n.contains("mike"))   return "mike";
         if (n.contains("randall"))                          return "randall";
         if (n.contains("celia"))                            return "celia";

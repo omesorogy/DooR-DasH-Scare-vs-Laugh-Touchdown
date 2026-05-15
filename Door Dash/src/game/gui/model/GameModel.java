@@ -92,7 +92,7 @@ public class GameModel {
         }
         // Any other RuntimeException propagates to controller which handles it safely.
 
-        // Read the single roll that the engine actually used — no separate roll here
+        // Read the single roll that the engine actually used - no separate roll here
         lastDiceRoll = game.getLastDiceRoll();
 
         int posAfter       = current.getPosition();
@@ -109,7 +109,7 @@ public class GameModel {
         boolean cardLanded = false;
         if (drawnCard != null) {
             // Check if the cell at posAfter OR any cell in the plausible movement range
-            // is a CardCell — meaning the engine actually triggered a draw this turn
+            // is a CardCell - meaning the engine actually triggered a draw this turn
             for (int step = 1; step <= lastDiceRoll * 3; step++) {
                 int checkIdx = (posBefore + step) % 100;
                 int r = indexToRow(checkIdx), c = indexToCol(checkIdx);
@@ -129,7 +129,12 @@ public class GameModel {
                 oppPosBefore, oppPosAfter, oppEnergyBefore, oppEnergyAfter);
         }
 
-        lastLogEntry = buildLog(current, posBefore, posAfter, energyBefore, energyAfter);
+        // Actual steps moved (may differ from dice due to Dasher x2/x3, MultiTasker /2, or transport)
+        // Use modular arithmetic to handle wrap-around
+        int actualSteps = (posAfter - posBefore + 100) % 100;
+
+        lastLogEntry = buildLog(current, posBefore, posAfter, energyBefore, energyAfter,
+                                lastDiceRoll, actualSteps);
         return null;
     }
 
@@ -205,9 +210,12 @@ public class GameModel {
         return sb.toString().trim();
     }
 
-    private String buildLog(Monster m, int pb, int pa, int eb, int ea) {
+    private String buildLog(Monster m, int pb, int pa, int eb, int ea, int dice, int steps) {
         StringBuilder sb = new StringBuilder();
-        sb.append(m.getName()).append(" -> Cell ").append(pa);
+        sb.append(m.getName());
+        sb.append(" | Dice: ").append(dice);
+        if (steps != dice) sb.append(" -> moved ").append(steps).append(" steps");
+        sb.append(" | Cell ").append(pb).append(" -> ").append(pa);
         if (ea != eb) {
             int diff = ea - eb;
             sb.append(" | Energy ").append(diff > 0 ? "+" : "").append(diff);

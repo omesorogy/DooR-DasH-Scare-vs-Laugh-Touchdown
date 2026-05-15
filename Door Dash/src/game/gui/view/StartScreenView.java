@@ -58,8 +58,8 @@ public class StartScreenView {
         content.setPadding(new Insets(40));
         content.setMaxWidth(720);
 
-        // Logo image (optional)
-        ImageView logoView = tryLoadImage("logo", 220, 100);
+        // Logo image - large at top of menu
+        ImageView logoView = tryLoadImage("logo", 320, 320);
 
         Text titleTop = new Text("DooR DasH");
         titleTop.setFont(Font.font("Impact", FontWeight.BOLD, 68));
@@ -129,15 +129,34 @@ public class StartScreenView {
         content.getChildren().addAll(titleTop, titleSub, divider);
         content.getChildren().addAll(chooseLabel, roleBox, modeLabel, modeBox, rulesPane, startBtn);
 
-        root.getChildren().addAll(bg, content);
+        // Exit button - bottom-left corner
+        Button exitBtn = new Button("EXIT");
+        exitBtn.setFont(Font.font("Impact", 16));
+        exitBtn.setPrefSize(120, 38);
+        exitBtn.setStyle(
+            "-fx-background-color:rgba(180,30,30,0.85);" +
+            "-fx-text-fill:white;-fx-background-radius:8;-fx-cursor:hand;");
+        exitBtn.setOnMouseEntered(e2 -> exitBtn.setStyle(
+            "-fx-background-color:rgba(220,50,50,1);" +
+            "-fx-text-fill:white;-fx-background-radius:8;-fx-cursor:hand;"));
+        exitBtn.setOnMouseExited(e2 -> exitBtn.setStyle(
+            "-fx-background-color:rgba(180,30,30,0.85);" +
+            "-fx-text-fill:white;-fx-background-radius:8;-fx-cursor:hand;"));
+        exitBtn.setOnAction(e2 -> showExitConfirm(stage, root));
+        StackPane.setAlignment(exitBtn, Pos.BOTTOM_LEFT);
+        StackPane.setMargin(exitBtn, new Insets(0, 0, 18, 18));
+
+        root.getChildren().addAll(bg, content, exitBtn);
 
         Scene scene = new Scene(root);
         stage.setScene(scene);
         stage.setResizable(true);
         stage.setMaximized(true);
-        stage.setFullScreen(true);
-        stage.setFullScreenExitHint("Press F11 or Escape to exit fullscreen.");
-        stage.show();
+        // setFullScreen must not be called while another layout pass is pending
+        javafx.application.Platform.runLater(() -> {
+            stage.setFullScreen(true);
+            stage.setFullScreenExitHint("Press F11 or Escape to exit fullscreen.");
+        });
 
         scene.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.F11)
@@ -272,5 +291,70 @@ public class StartScreenView {
             } catch (Exception ignored) {}
         }
         return null;
+    }
+
+    private void showExitConfirm(Stage stage, StackPane root) {
+        StackPane overlay = buildExitOverlay(
+            () -> { game.gui.Main.stopMusic(); stage.close(); },
+            () -> root.getChildren().remove(root.getChildren().get(root.getChildren().size() - 1))
+        );
+        root.getChildren().add(overlay);
+    }
+
+    public static StackPane buildExitOverlay(Runnable onYes, Runnable onNo) {
+        StackPane overlay = new StackPane();
+        overlay.setStyle("-fx-background-color:rgba(0,0,0,0.88);");
+
+        javafx.scene.layout.VBox card = new javafx.scene.layout.VBox(20);
+        card.setAlignment(javafx.geometry.Pos.CENTER);
+        card.setPadding(new javafx.geometry.Insets(40));
+        card.setMaxWidth(500);
+        card.setMaxHeight(500);
+        card.setStyle(
+            "-fx-background-color:linear-gradient(to bottom,#1a0a00,#2a1500);" +
+            "-fx-border-color:#FFD700;-fx-border-width:3;" +
+            "-fx-border-radius:18;-fx-background-radius:18;");
+
+        // "Are you sure" image
+        javafx.scene.image.ImageView img = null;
+        try {
+            java.io.InputStream is = StartScreenView.class
+                .getResourceAsStream("/game/gui/resources/images/are_you_sure.png");
+            if (is != null) {
+                javafx.scene.image.Image image = new javafx.scene.image.Image(is);
+                if (!image.isError()) {
+                    img = new javafx.scene.image.ImageView(image);
+                    img.setFitWidth(360);
+                    img.setFitHeight(260);
+                    img.setPreserveRatio(true);
+                    img.setSmooth(true);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // Buttons
+        javafx.scene.control.Button yesBtn = new javafx.scene.control.Button("Pretty sure");
+        yesBtn.setFont(javafx.scene.text.Font.font("Impact", 18));
+        yesBtn.setPrefSize(160, 46);
+        yesBtn.setStyle(
+            "-fx-background-color:linear-gradient(to right,#cc2200,#ff4400);" +
+            "-fx-text-fill:white;-fx-background-radius:23;-fx-cursor:hand;");
+        yesBtn.setOnAction(e -> onYes.run());
+
+        javafx.scene.control.Button noBtn = new javafx.scene.control.Button("No");
+        noBtn.setFont(javafx.scene.text.Font.font("Impact", 18));
+        noBtn.setPrefSize(160, 46);
+        noBtn.setStyle(
+            "-fx-background-color:linear-gradient(to right,#1a6b20,#2aaa30);" +
+            "-fx-text-fill:white;-fx-background-radius:23;-fx-cursor:hand;");
+        noBtn.setOnAction(e -> onNo.run());
+
+        javafx.scene.layout.HBox btnRow = new javafx.scene.layout.HBox(24, yesBtn, noBtn);
+        btnRow.setAlignment(javafx.geometry.Pos.CENTER);
+
+        if (img != null) card.getChildren().add(img);
+        card.getChildren().add(btnRow);
+        overlay.getChildren().add(card);
+        return overlay;
     }
 }

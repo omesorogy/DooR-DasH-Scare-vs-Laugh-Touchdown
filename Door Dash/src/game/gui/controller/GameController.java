@@ -87,7 +87,28 @@ public class GameController {
 
         // LEFT
         playerPanel = new MonsterInfoPanel(true);
-        leftBox = new VBox(8, buildActionsPanel(), playerPanel);
+
+        // Card deck image - bottom of left panel
+        StackPane deckPane = new StackPane();
+        deckPane.setAlignment(Pos.CENTER);
+        deckPane.setPadding(new Insets(4));
+        try {
+            InputStream deckIs = getClass().getResourceAsStream(
+                "/game/gui/resources/images/card_deck.jpeg");
+            if (deckIs != null) {
+                Image deckImg = new Image(deckIs);
+                if (!deckImg.isError()) {
+                    ImageView deckView = new ImageView(deckImg);
+                    deckView.setFitWidth(220);
+                    deckView.setFitHeight(220);
+                    deckView.setPreserveRatio(true);
+                    deckView.setSmooth(true);
+                    deckPane.getChildren().add(deckView);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        leftBox = new VBox(8, buildActionsPanel(), playerPanel, deckPane);
         leftBox.setPadding(new Insets(8));
         leftBox.setStyle("-fx-background-color: #0d0d1f;");
         leftBox.setMinWidth(SIDE_MIN);
@@ -236,7 +257,22 @@ public class GameController {
             "-fx-text-fill: white; -fx-background-radius: 10; -fx-cursor: hand;");
         rollBtn.setOnAction(e -> handleRoll());
 
-        panel.getChildren().addAll(header, powerupBtn, rollBtn);
+        Button exitBtn = new Button("EXIT GAME");
+        exitBtn.setMaxWidth(Double.MAX_VALUE);
+        exitBtn.setPrefHeight(38);
+        exitBtn.setFont(Font.font("Impact", 14));
+        exitBtn.setStyle(
+            "-fx-background-color:rgba(160,20,20,0.9);" +
+            "-fx-text-fill:white;-fx-background-radius:10;-fx-cursor:hand;");
+        exitBtn.setOnAction(e -> {
+            StackPane overlay = StartScreenView.buildExitOverlay(
+                () -> { game.gui.Main.stopMusic(); mainStage.close(); },
+                () -> rootStack.getChildren().remove(rootStack.getChildren().get(rootStack.getChildren().size() - 1))
+            );
+            rootStack.getChildren().add(overlay);
+        });
+
+        panel.getChildren().addAll(header, powerupBtn, rollBtn, exitBtn);
         return panel;
     }
 
@@ -542,8 +578,22 @@ public class GameController {
         }
 
         int roll = model.getLastDiceRoll();
+        // Compute actual steps from log - read from player's position change
+        Monster moved = model.getCurrent() == model.getPlayer() ? model.getOpponent() : model.getPlayer();
+        // current has already switched after playTurn, so the monster that just moved is the opponent of current
         animateDice(roll, () -> {
-            addLog(model.getLastLogEntry());
+            // After animation, update label to show actual movement if different from dice
+            String logEntry = model.getLastLogEntry();
+            // Extract actual steps from log entry (format: "Dice: N -> moved M steps")
+            if (logEntry.contains("-> moved ")) {
+                try {
+                    int start = logEntry.indexOf("-> moved ") + 8;
+                    int end   = logEntry.indexOf(" steps", start);
+                    int steps = Integer.parseInt(logEntry.substring(start, end).trim());
+                    diceLabel.setText("Dice: " + roll + "  (moved " + steps + ")");
+                } catch (Exception ignored) {}
+            }
+            addLog(logEntry);
 
             // Check if shield was broken this turn
             boolean playerShieldBroken   = playerShieldBefore   && !model.getPlayer().isShielded();
