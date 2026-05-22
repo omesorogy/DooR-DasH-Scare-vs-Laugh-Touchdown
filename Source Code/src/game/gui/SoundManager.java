@@ -4,8 +4,14 @@ import javafx.scene.media.Media;
 import javafx.scene.media.MediaPlayer;
 
 import java.net.URL;
+import java.io.File;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Central sound manager for DooR DasH.
@@ -30,7 +36,8 @@ public class SoundManager {
     // -----------------------------------------------------------------------
 
     private static final String[] SFX_FILES = {
-        "click.mp3", "boing.mp3", "error.mp3", "win.mp3", "lose.mp3"
+        "click.mp3", "boing.mp3", "error.mp3", "win.mp3", "lose.mp3",
+        "Cardflip.mp3", "Cell.mp3", "Landing.mp3", "shieldbreak.mp3"
     };
 
     // -----------------------------------------------------------------------
@@ -45,7 +52,42 @@ public class SoundManager {
     /** Pre-loaded Media objects – one per SFX file. */
     private final Map<String, Media> sfxCache = new HashMap<>();
 
+    /** Keep currently playing short SFX alive until they finish. */
+    private final List<MediaPlayer> activeSfxPlayers = new ArrayList<>();
+
     private SoundManager() {}
+
+    /**
+     * JavaFX Media can fail to play MP3 files directly from inside a packaged JAR/EXE.
+     * To make audio work after export, every audio resource is copied once to a
+     * temporary real file, then JavaFX plays that file URI.
+     */
+    private Media loadAudioResource(String filename) {
+        try {
+            URL url = getClass().getResource("/game/gui/resources/audio/" + filename);
+            if (url == null) return null;
+
+            String safeName = filename.replaceAll("[^A-Za-z0-9._-]", "_");
+            File temp = new File(System.getProperty("java.io.tmpdir"), "door_dash_audio_" + safeName);
+
+            if (!temp.exists() || temp.length() == 0) {
+                try (InputStream in = getClass().getResourceAsStream("/game/gui/resources/audio/" + filename);
+                     OutputStream out = Files.newOutputStream(temp.toPath())) {
+                    if (in == null) return null;
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
+                }
+                temp.deleteOnExit();
+            }
+
+            return new Media(temp.toURI().toString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
     // -----------------------------------------------------------------------
     //  Pre-loading
@@ -58,8 +100,8 @@ public class SoundManager {
     public void preloadSfx() {
         for (String filename : SFX_FILES) {
             try {
-                URL url = getClass().getResource("/game/gui/resources/audio/" + filename);
-                if (url != null) sfxCache.put(filename, new Media(url.toExternalForm()));
+                Media media = loadAudioResource(filename);
+                if (media != null) sfxCache.put(filename, media);
             } catch (Exception ignored) {}
         }
     }
@@ -72,12 +114,11 @@ public class SoundManager {
     public void startMusic() {
         if (musicPlayer != null) return;
         try {
-            URL url = getClass().getResource("/game/gui/resources/audio/Theme.mp3");
-            if (url == null) return;
-            Media media = new Media(url.toExternalForm());
+            Media media = loadAudioResource("Theme.mp3");
+            if (media == null) return;
             musicPlayer = new MediaPlayer(media);
             musicPlayer.setCycleCount(MediaPlayer.INDEFINITE);
-            musicPlayer.setVolume(musicMuted ? 0.0 : 0.6);
+            musicPlayer.setVolume(musicMuted ? 0.0 : 0.1);
             musicPlayer.play();
         } catch (Exception ignored) {}
     }
@@ -114,9 +155,8 @@ public class SoundManager {
         try {
             Media media = sfxCache.get(fileName);
             if (media == null) {
-                URL url = getClass().getResource("/game/gui/resources/audio/" + fileName);
-                if (url == null) return;
-                media = new Media(url.toExternalForm());
+                media = loadAudioResource(fileName);
+                if (media == null) return;
                 sfxCache.put(fileName, media);
             }
             winScreenPlayer = new MediaPlayer(media);
@@ -147,7 +187,7 @@ public class SoundManager {
         if (musicPlayer == null) {
             startMusic();
         } else {
-            musicPlayer.setVolume(musicMuted ? 0.0 : 0.6);
+            musicPlayer.setVolume(musicMuted ? 0.0 : 0.1);
             musicPlayer.play();
         }
     }
@@ -155,7 +195,7 @@ public class SoundManager {
     /** Toggle music mute. Returns new muted state. */
     public boolean toggleMusicMute() {
         musicMuted = !musicMuted;
-        if (musicPlayer != null) musicPlayer.setVolume(musicMuted ? 0.0 : 0.6);
+        if (musicPlayer != null) musicPlayer.setVolume(musicMuted ? 0.0 : 0.1);
         return musicMuted;
     }
 
@@ -183,14 +223,22 @@ public class SoundManager {
             Media media = sfxCache.get(filename);
             if (media == null) {
                 // Fallback: load on demand if preload was skipped
-                URL url = getClass().getResource("/game/gui/resources/audio/" + filename);
-                if (url == null) return;
-                media = new Media(url.toExternalForm());
+                media = loadAudioResource(filename);
+                if (media == null) return;
                 sfxCache.put(filename, media);
             }
             MediaPlayer player = new MediaPlayer(media);
-            player.setVolume(0.85);
-            player.setOnEndOfMedia(() -> { player.stop(); player.dispose(); });
+            player.setVolume(0.95);
+            activeSfxPlayers.add(player);
+            player.setOnEndOfMedia(() -> {
+                player.stop();
+                player.dispose();
+                activeSfxPlayers.remove(player);
+            });
+            player.setOnError(() -> {
+                player.dispose();
+                activeSfxPlayers.remove(player);
+            });
             player.play();
         } catch (Exception ignored) {}
     }
@@ -199,9 +247,13 @@ public class SoundManager {
     //  Named SFX helpers
     // -----------------------------------------------------------------------
 
-    public void playClick()   { playSfx("click.mp3");  }
-    public void playBoing()   { playSfx("boing.mp3");  }
-    public void playError()   { playSfx("error.mp3");  }
-    public void playWin()     { playSfx("win.mp3");    }
-    public void playLose()    { playSfx("lose.mp3");   }
+    public void playClick()        { playSfx("click.mp3");       }
+    public void playBoing()        { playSfx("boing.mp3");       }
+    public void playError()        { playSfx("error.mp3");       }
+    public void playWin()          { playSfx("win.mp3");         }
+    public void playLose()         { playSfx("lose.mp3");        }
+    public void playCardFlip()     { playSfx("Cardflip.mp3");    }
+    public void playCellHover()    { playSfx("Cell.mp3");        }
+    public void playLanding()      { playSfx("Landing.mp3");     }
+    public void playShieldBreak()  { playSfx("shieldbreak.mp3"); }
 }

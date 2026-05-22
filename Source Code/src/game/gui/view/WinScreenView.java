@@ -17,7 +17,6 @@ import javafx.scene.text.*;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
-import java.io.InputStream;
 
 public class WinScreenView {
 
@@ -52,20 +51,22 @@ public class WinScreenView {
             new Stop(0, Color.web(victoryStyle ? "#0a2a0a" : "#2a0a0a")),
             new Stop(1, Color.web("#000000"))));
 
-        // Particles
-        for (int i = 0; i < 30; i++) {
-            Circle p = new Circle(3+Math.random()*6,
-                Color.web(victoryStyle ? "#00FF88":"#FF6622", 0.5+Math.random()*0.5));
+        // Particles - fewer, with finite cycle count so they stop consuming CPU
+        for (int i = 0; i < 10; i++) {
+            Circle p = new Circle(3+Math.random()*5,
+                Color.web(victoryStyle ? "#00FF88":"#FF6622", 0.5+Math.random()*0.4));
             p.setTranslateX(-450+Math.random()*900);
             p.setTranslateY(-350+Math.random()*700);
             root.getChildren().add(p);
-            double dur = 2+Math.random()*3;
+            double dur = 2.5+Math.random()*2;
             TranslateTransition tt = new TranslateTransition(Duration.seconds(dur), p);
-            tt.setByY(-60-Math.random()*80); tt.setAutoReverse(true);
-            tt.setCycleCount(Animation.INDEFINITE); tt.play();
+            tt.setByY(-50-Math.random()*60); tt.setAutoReverse(true);
+            tt.setCycleCount(6); // finite - stops after ~15s
+            tt.play();
             FadeTransition ft = new FadeTransition(Duration.seconds(dur*0.8), p);
-            ft.setFromValue(1); ft.setToValue(0.2); ft.setAutoReverse(true);
-            ft.setCycleCount(Animation.INDEFINITE); ft.play();
+            ft.setFromValue(0.9); ft.setToValue(0.2); ft.setAutoReverse(true);
+            ft.setCycleCount(6);
+            ft.play();
         }
 
         VBox content = new VBox(20);
@@ -184,8 +185,8 @@ public class WinScreenView {
         ScaleTransition ring1Scale = new ScaleTransition(Duration.millis(900), ring1);
         ring1Scale.setFromX(0.2);
         ring1Scale.setFromY(0.2);
-        ring1Scale.setToX(5.8);
-        ring1Scale.setToY(5.8);
+        ring1Scale.setToX(3.5);
+        ring1Scale.setToY(3.5);
         FadeTransition ring1Fade = new FadeTransition(Duration.millis(900), ring1);
         ring1Fade.setFromValue(0.9);
         ring1Fade.setToValue(0);
@@ -193,8 +194,8 @@ public class WinScreenView {
         ScaleTransition ring2Scale = new ScaleTransition(Duration.millis(1100), ring2);
         ring2Scale.setFromX(0.1);
         ring2Scale.setFromY(0.1);
-        ring2Scale.setToX(6.6);
-        ring2Scale.setToY(6.6);
+        ring2Scale.setToX(4.2);
+        ring2Scale.setToY(4.2);
         FadeTransition ring2Fade = new FadeTransition(Duration.millis(1100), ring2);
         ring2Fade.setFromValue(0.8);
         ring2Fade.setToValue(0);
@@ -205,7 +206,7 @@ public class WinScreenView {
 
         // Confetti rain only belongs on victory screens. Do not show it when the human loses to the bot.
         if (victoryStyle) {
-            for (int i = 0; i < 54; i++) {
+            for (int i = 0; i < 22; i++) {
                 Rectangle confetti = new Rectangle(6 + Math.random() * 8, 10 + Math.random() * 12);
                 confetti.setArcWidth(3);
                 confetti.setArcHeight(3);
@@ -216,7 +217,7 @@ public class WinScreenView {
                 confetti.setRotate(Math.random() * 360);
                 root.getChildren().add(confetti);
 
-                TranslateTransition fall = new TranslateTransition(Duration.millis(1800 + Math.random() * 900), confetti);
+                TranslateTransition fall = new TranslateTransition(Duration.millis(1100 + Math.random() * 500), confetti);
                 fall.setByY(650 + Math.random() * 180);
                 fall.setByX(-60 + Math.random() * 120);
 
@@ -229,7 +230,7 @@ public class WinScreenView {
                 fade.setFromValue(0.9);
                 fade.setToValue(0);
 
-                PauseTransition delay = new PauseTransition(Duration.millis(Math.random() * 350));
+                PauseTransition delay = new PauseTransition(Duration.millis(Math.random() * 200));
                 ParallelTransition motion = new ParallelTransition(fall, spin, fade);
                 SequentialTransition seq = new SequentialTransition(delay, motion);
                 seq.setOnFinished(e -> root.getChildren().remove(confetti));
@@ -314,21 +315,13 @@ public class WinScreenView {
 
     private ImageView tryLoadImage(String key, double w, double h) {
         if (key == null) return null;
-        String[] exts = {".png", ".jpg", ".jpeg"};
-        for (String ext : exts) {
-            try {
-                InputStream is = getClass().getResourceAsStream(
-                    "/game/gui/resources/images/" + key + ext);
-                if (is != null) {
-                    Image img = new Image(is);
-                    if (!img.isError()) {
-                        ImageView iv = new ImageView(img);
-                        iv.setFitWidth(w); iv.setFitHeight(h);
-                        iv.setPreserveRatio(true); iv.setSmooth(true);
-                        return iv;
-                    }
-                }
-            } catch (Exception ignored) {}
+        // Use the app-wide static image cache so no disk I/O happens here
+        Image img = game.gui.view.GameBoardView.getCachedImage(key);
+        if (img != null) {
+            ImageView iv = new ImageView(img);
+            iv.setFitWidth(w); iv.setFitHeight(h);
+            iv.setPreserveRatio(true); iv.setSmooth(true);
+            return iv;
         }
         return null;
     }

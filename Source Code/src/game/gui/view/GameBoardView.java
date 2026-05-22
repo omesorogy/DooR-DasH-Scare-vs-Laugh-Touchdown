@@ -58,6 +58,13 @@ public class GameBoardView extends Region {
 
     private static final Map<String, Image> imgCache = new HashMap<>();
 
+    // ---- Hover / conveyor / ambient animation state ----
+    private final Map<StackPane, Animation> hoverAnimations = new HashMap<>();
+    private final List<Animation> conveyorAnimations = new ArrayList<>();
+    private final List<Animation> ambientAnimations  = new ArrayList<>();
+    private Timeline screenShakeTimeline = null;
+    private boolean hoverSoundCooldown = false;
+
     // ---- Consistent cell colours ----
     private static final String C_SCARER_DOOR          = "#4A1080";  // deep purple      - scarer doors
     private static final String C_LAUGHER_DOOR         = "#0A5C28";  // deep green        - laugher doors
@@ -123,6 +130,11 @@ public class GameBoardView extends Region {
         }
     }
 
+    /** Public accessor so other views (WinScreenView) can share the cache. */
+    public static Image getCachedImage(String key) {
+        return imgCache.get(key);
+    }
+
     private Image loadImage(String key) {
         String[] exts = {".png", ".jpg", ".jpeg"};
 
@@ -176,6 +188,8 @@ public class GameBoardView extends Region {
     @Override protected double computePrefWidth(double h)  { return 700; }
     @Override protected double computePrefHeight(double w) { return 700; }
 
+    private int lastCellSize = -1;
+
     @Override
     protected void layoutChildren() {
         double w = getWidth(), h = getHeight();
@@ -191,15 +205,65 @@ public class GameBoardView extends Region {
                     gx + col*(cell+GAP),
                     gy + (ROWS-1-row)*(cell+GAP),
                     cell, cell);
-        refreshCells((int) cell);
+        int cs = (int) cell;
+        // Full cell rebuild only when cell size changed (window resize, first layout).
+        // Token-only refresh when state changes during gameplay (much cheaper).
+        if (cs != lastCellSize) {
+            lastCellSize = cs;
+            refreshCells(cs);
+        } else {
+            refreshTokensOnly(cs);
+        }
     }
 
     public void refresh() { requestLayout(); }
 
+    /** Forces a full cell rebuild regardless of size — call when cell content changes. */
+    public void refreshFull() {
+        lastCellSize = -1;
+        requestLayout();
+    }
+
     // ---- Cell rendering ----
+
+    /**
+     * Fast path: only replaces the monster token nodes in each cell.
+     * All background/image/overlay nodes are left intact.
+     * Called on every refresh() when the cell size has not changed.
+     */
+    private void refreshTokensOnly(int cs) {
+        stopTokenPulseAnimations();
+        Monster player   = model.getPlayer();
+        Monster opponent = model.getOpponent();
+        int tokR = Math.max(10, cs / 5);
+
+        for (int row = 0; row < ROWS; row++) {
+            for (int col = 0; col < COLS; col++) {
+                StackPane pane = cellPanes[row][col];
+                int idx = model.cellIndexAt(row, col);
+
+                // Remove any existing token nodes (they are always the LAST children)
+                // Token nodes are StackPanes; bg, imageview and Group are not StackPane
+                pane.getChildren().removeIf(n -> n instanceof StackPane);
+
+                int playerDisplayPosition = (player == heldMonster && heldMonsterIndex >= 0)
+                    ? heldMonsterIndex : player.getPosition();
+                int opponentDisplayPosition = (opponent == heldMonster && heldMonsterIndex >= 0)
+                    ? heldMonsterIndex : opponent.getPosition();
+
+                boolean playerHere   = (player   != animatingMonster && playerDisplayPosition   == idx);
+                boolean opponentHere = (opponent != animatingMonster && opponentDisplayPosition == idx);
+                if (playerHere || opponentHere) {
+                    addTokens(pane, player, opponent, playerHere, opponentHere, tokR);
+                }
+            }
+        }
+    }
 
     private void refreshCells(int cs) {
         stopTokenPulseAnimations();
+        stopConveyorAnimations();
+        stopAmbientAnimations();
 
         Cell[][] board   = model.getBoardCells();
         Monster player   = model.getPlayer();
@@ -227,6 +291,14 @@ public class GameBoardView extends Region {
                 bg.setStroke(Color.web(exhausted ? "#444444" : "#3A3A60"));
                 bg.setStrokeWidth(1.5);
                 pane.getChildren().add(bg);
+
+                // Hover scale + glow + sound
+                attachHoverEffect(pane, bg, cell instanceof ConveyorBelt);
+
+                // Conveyor belt opacity pulse
+                if (cell instanceof ConveyorBelt) {
+                    animateConveyorCell(pane);
+                }
 
                 // 2. Cell image (non-door cells only, full opacity)
                 addCellImage(pane, cell, idx, imgSz, exhausted);
@@ -430,6 +502,11 @@ public class GameBoardView extends Region {
         }
         StackPane.setAlignment(view, Pos.CENTER);
         pane.getChildren().add(view);
+
+        // Ambient door breathe animation
+        if (cell instanceof DoorCell && !exhausted) {
+            attachAmbientDoorAnimation(view, idx);
+        }
     }
 
     // ---- Monster tokens ----
@@ -521,6 +598,9 @@ public class GameBoardView extends Region {
             activeTokenAnimations.add(st);
             st.play();
         }
+
+        // Monster personality idle animations
+        attachMonsterPersonality(tokenStack, m);
 
         double preferredSize = (tokR + 4) * 2.0;
         tokenStack.setMinSize(preferredSize, preferredSize);
@@ -624,7 +704,6 @@ public class GameBoardView extends Region {
         }
 
         // Never allow two movement animations to run on top of each other.
-        // This prevents lag/ghost states after cards such as Confusion or invalid/retry turns.
         if (activeMoveAnimation != null) {
             activeMoveAnimation.stop();
             activeMoveAnimation = null;
@@ -645,15 +724,29 @@ public class GameBoardView extends Region {
         applyCss();
         layout();
 
-        java.util.List<Integer> path = buildMovementPath(fromIndex, toIndex, lastRoll);
-        if (path.isEmpty()) {
-            refresh();
-            if (onFinished != null) onFinished.run();
-            return;
+        // Detect if the dice-roll landing cell is a ConveyorBelt.
+        // The engine already applied the belt's effect so toIndex is the post-belt position.
+        // beltLandIndex is where the dice roll actually lands (pre-belt), beltEffect is the
+        // number of extra cells the belt carries the monster.
+        int beltLandIndex = -1;
+        int beltEffect    = 0;
+        {
+            // Find the belt cell: it is at fromIndex + actualSteps (before belt carry).
+            // We use actualSteps because MultiTaskers move half the dice roll.
+            Cell[][] board = model.getBoardCells();
+            int diceTarget = Math.max(0, Math.min(99, fromIndex + lastRoll));
+            int row = model.indexToRow(diceTarget);
+            int col = model.indexToCol(diceTarget);
+            if (row >= 0 && col >= 0) {
+                Cell landCell = board[row][col];
+                if (landCell instanceof ConveyorBelt && diceTarget != toIndex) {
+                    beltLandIndex = diceTarget;
+                    beltEffect    = ((ConveyorBelt) landCell).getEffect();
+                }
+            }
         }
 
-        int startIndex = path.get(0);
-        Point2D start = cellCenter(startIndex);
+        Point2D start = cellCenter(fromIndex);
         if (start == null) {
             animatingMonster = null;
             refresh();
@@ -669,15 +762,49 @@ public class GameBoardView extends Region {
         getChildren().add(movingToken);
         activeMovingToken = movingToken;
 
+        // --- Build the two-leg or single-leg path ---
         SequentialTransition sequence = new SequentialTransition();
-        for (int i = 1; i < path.size(); i++) {
-            Point2D target = cellCenter(path.get(i));
-            if (target == null) continue;
-            TranslateTransition step = new TranslateTransition(Duration.millis(95), movingToken);
-            step.setToX(target.getX() - start.getX());
-            step.setToY(target.getY() - start.getY());
-            step.setInterpolator(Interpolator.EASE_BOTH);
-            sequence.getChildren().add(step);
+
+        if (beltLandIndex >= 0 && beltLandIndex != toIndex) {
+            // Leg 1: dice roll movement to the belt cell
+            java.util.List<Integer> leg1 = buildMovementPath(fromIndex, beltLandIndex, lastRoll);
+            for (int i = 1; i < leg1.size(); i++) {
+                Point2D target = cellCenter(leg1.get(i));
+                if (target == null) continue;
+                TranslateTransition step = new TranslateTransition(Duration.millis(95), movingToken);
+                step.setToX(target.getX() - start.getX());
+                step.setToY(target.getY() - start.getY());
+                step.setInterpolator(Interpolator.EASE_BOTH);
+                sequence.getChildren().add(step);
+            }
+
+            // Brief pause on the belt so the player can see it activate
+            sequence.getChildren().add(new PauseTransition(Duration.millis(220)));
+
+            // Leg 2: belt carries the monster to the final cell
+            java.util.List<Integer> leg2 = buildMovementPath(beltLandIndex, toIndex, Math.abs(beltEffect));
+            for (int i = 1; i < leg2.size(); i++) {
+                Point2D target = cellCenter(leg2.get(i));
+                if (target == null) continue;
+                // Slightly faster steps for the belt carry to feel distinct
+                TranslateTransition step = new TranslateTransition(Duration.millis(75), movingToken);
+                step.setToX(target.getX() - start.getX());
+                step.setToY(target.getY() - start.getY());
+                step.setInterpolator(Interpolator.LINEAR);
+                sequence.getChildren().add(step);
+            }
+        } else {
+            // Normal single-leg movement (no conveyor, or belt already at toIndex)
+            java.util.List<Integer> path = buildMovementPath(fromIndex, toIndex, lastRoll);
+            for (int i = 1; i < path.size(); i++) {
+                Point2D target = cellCenter(path.get(i));
+                if (target == null) continue;
+                TranslateTransition step = new TranslateTransition(Duration.millis(95), movingToken);
+                step.setToX(target.getX() - start.getX());
+                step.setToY(target.getY() - start.getY());
+                step.setInterpolator(Interpolator.EASE_BOTH);
+                sequence.getChildren().add(step);
+            }
         }
 
         sequence.setOnFinished(e -> {
@@ -700,25 +827,42 @@ public class GameBoardView extends Region {
         sequence.play();
     }
 
-    private java.util.List<Integer> buildMovementPath(int fromIndex, int toIndex, int lastRoll) {
+    private java.util.List<Integer> buildMovementPath(int fromIndex, int toIndex, int actualSteps) {
         java.util.ArrayList<Integer> path = new java.util.ArrayList<Integer>();
         fromIndex = Math.max(0, Math.min(99, fromIndex));
-        toIndex = Math.max(0, Math.min(99, toIndex));
+        toIndex   = Math.max(0, Math.min(99, toIndex));
         path.add(fromIndex);
+        if (fromIndex == toIndex) return path;
 
-        boolean forwardWrap = toIndex < fromIndex && (fromIndex + Math.max(1, lastRoll) * 3 >= 100);
-        if (toIndex >= fromIndex || forwardWrap) {
-            int idx = fromIndex;
-            int guard = 0;
-            while (idx != toIndex && guard < 120) {
-                idx = (idx + 1) % 100;
-                path.add(idx);
-                guard++;
-            }
+        // Determine direction from the actual steps and positions.
+        // Forward: toIndex > fromIndex, OR it's a wrap (toIndex < fromIndex but steps > gap).
+        // Backward: toIndex < fromIndex AND steps <= gap (contamination sock / start-over).
+        boolean isForward;
+        if (toIndex > fromIndex) {
+            isForward = true;
+        } else if (toIndex < fromIndex) {
+            // Distinguish wrap-forward from backward movement:
+            // If going forward and wrapping: distance going forward = (100-from)+to
+            // If going backward: distance = from-to
+            // Use whichever matches actualSteps more closely.
+            int forwardDist  = (100 - fromIndex) + toIndex;
+            int backwardDist = fromIndex - toIndex;
+            isForward = (Math.abs(actualSteps - forwardDist) <= Math.abs(actualSteps - backwardDist));
         } else {
-            for (int idx = fromIndex - 1; idx >= toIndex; idx--) {
-                path.add(idx);
+            return path; // same cell
+        }
+
+        int idx = fromIndex;
+        int guard = 0;
+        while (idx != toIndex && guard < 110) {
+            if (isForward) {
+                idx = (idx + 1) % 100;
+            } else {
+                idx = idx - 1;
+                if (idx < 0) idx = 0;
             }
+            path.add(idx);
+            guard++;
         }
         return path;
     }
@@ -747,5 +891,173 @@ public class GameBoardView extends Region {
     /** Load a card image for external use (e.g. popup). */
     public Image getCardImage(String cardName) {
         return imgCache.get(cardImageKey(cardName));
+    }
+
+    // =========================================================================
+    //  SCREEN SHAKE
+    // =========================================================================
+
+    /**
+     * Shakes the entire board briefly.  Call from GameController when the monster
+     * takes a hit, loses energy, or a contamination sock activates.
+     */
+    public void screenShake() {
+        if (screenShakeTimeline != null) {
+            screenShakeTimeline.stop();
+            setTranslateX(0);
+            setTranslateY(0);
+        }
+        double[] xs = {  6, -6,  5, -5,  3, -3,  1, -1, 0 };
+        double[] ys = { -4,  4, -3,  3, -2,  2, -1,  1, 0 };
+        screenShakeTimeline = new Timeline();
+        for (int i = 0; i < xs.length; i++) {
+            final double tx = xs[i], ty = ys[i];
+            screenShakeTimeline.getKeyFrames().add(
+                new KeyFrame(Duration.millis(i * 45), e -> {
+                    setTranslateX(tx);
+                    setTranslateY(ty);
+                }));
+        }
+        screenShakeTimeline.setOnFinished(e -> { setTranslateX(0); setTranslateY(0); });
+        screenShakeTimeline.play();
+    }
+
+    // =========================================================================
+    //  PARTICLE EFFECTS
+    // =========================================================================
+
+    /**
+     * Spawns small coloured circles that fly outward from the given cell index,
+     * fade out, then remove themselves.  Works great for teleport, shield-glow, etc.
+     */
+    public void spawnParticles(int cellIndex, Color color, int count) {
+        int row = model.indexToRow(cellIndex);
+        int col = model.indexToCol(cellIndex);
+        if (row < 0 || col < 0) return;
+        StackPane cell = cellPanes[row][col];
+        Point2D centre = new Point2D(cell.getLayoutX() + cell.getWidth() / 2.0,
+                                     cell.getLayoutY() + cell.getHeight() / 2.0);
+        java.util.Random rng = new java.util.Random();
+        for (int i = 0; i < count; i++) {
+            Circle p = new Circle(3 + rng.nextDouble() * 3, color);
+            p.setManaged(false);
+            p.setOpacity(0.9);
+            double startX = centre.getX() - 4 + rng.nextDouble() * 8;
+            double startY = centre.getY() - 4 + rng.nextDouble() * 8;
+            p.relocate(startX, startY);
+            getChildren().add(p);
+
+            double dx = (rng.nextDouble() - 0.5) * 60;
+            double dy = (rng.nextDouble() - 0.5) * 60;
+            double delay = i * 30;
+
+            TranslateTransition move = new TranslateTransition(Duration.millis(550), p);
+            move.setByX(dx); move.setByY(dy);
+            move.setDelay(Duration.millis(delay));
+
+            FadeTransition fade = new FadeTransition(Duration.millis(550), p);
+            fade.setToValue(0);
+            fade.setDelay(Duration.millis(delay));
+
+            ParallelTransition pt = new ParallelTransition(move, fade);
+            pt.setOnFinished(e -> getChildren().remove(p));
+            pt.play();
+        }
+    }
+
+    // =========================================================================
+    //  HOVER ANIMATIONS (called in refreshCells)
+    // =========================================================================
+
+    private void attachHoverEffect(StackPane pane, Rectangle bg, boolean isConveyor) {
+        // Store original stroke so we can restore it
+        String normalStroke  = "#3A3A60";
+        String hoverStroke   = isConveyor ? "#00DDFF" : "#FFD700";
+        double normalWidth   = 1.5;
+        double hoverWidth    = 2.5;
+
+        pane.setOnMouseEntered(e -> {
+            pane.setScaleX(1.08);
+            pane.setScaleY(1.08);
+            bg.setStroke(Color.web(hoverStroke));
+            bg.setStrokeWidth(hoverWidth);
+            bg.setEffect(new DropShadow(12, Color.web(hoverStroke, 0.7)));
+
+            // Throttled hover sound
+            if (!hoverSoundCooldown) {
+                game.gui.SoundManager.get().playCellHover();
+                hoverSoundCooldown = true;
+                PauseTransition cooldown = new PauseTransition(Duration.millis(180));
+                cooldown.setOnFinished(ev -> hoverSoundCooldown = false);
+                cooldown.play();
+            }
+        });
+        pane.setOnMouseExited(e -> {
+            pane.setScaleX(1.0);
+            pane.setScaleY(1.0);
+            bg.setStroke(Color.web(normalStroke));
+            bg.setStrokeWidth(normalWidth);
+            bg.setEffect(null);
+        });
+    }
+
+    // =========================================================================
+    //  CONVEYOR BELT PULSE ANIMATION
+    // =========================================================================
+
+    private void animateConveyorCell(StackPane pane) {
+        FadeTransition ft = new FadeTransition(Duration.millis(900), pane);
+        ft.setFromValue(0.80);
+        ft.setToValue(1.0);
+        ft.setAutoReverse(true);
+        ft.setCycleCount(Animation.INDEFINITE);
+        conveyorAnimations.add(ft);
+        ft.play();
+    }
+
+    private void stopConveyorAnimations() {
+        for (Animation a : conveyorAnimations) a.stop();
+        conveyorAnimations.clear();
+    }
+
+    // =========================================================================
+    //  AMBIENT DOOR MOTION
+    // =========================================================================
+
+    /**
+     * Gives door-cell images a gentle opacity breathe so the board looks alive.
+     */
+    private void attachAmbientDoorAnimation(ImageView iv, int seed) {
+        // Only animate every third door to reduce the number of simultaneous animations.
+        if (seed % 3 != 0) return;
+        double delay = (seed % 6) * 150;
+        FadeTransition ft = new FadeTransition(Duration.millis(1600 + seed * 60), iv);
+        ft.setFromValue(0.35);
+        ft.setToValue(0.52);
+        ft.setAutoReverse(true);
+        ft.setCycleCount(Animation.INDEFINITE);
+        ft.setDelay(Duration.millis(delay));
+        ambientAnimations.add(ft);
+        ft.play();
+    }
+
+    private void stopAmbientAnimations() {
+        for (Animation a : ambientAnimations) a.stop();
+        ambientAnimations.clear();
+    }
+
+    // =========================================================================
+    //  MONSTER PERSONALITY IDLE ANIMATIONS
+    // =========================================================================
+
+    /**
+     * Adds a subtle idle animation to a monster token based on which monster it is.
+     * Boo bounces, Randall fades, Roz barely moves (blink), Yeti stomps.
+     */
+    private void attachMonsterPersonality(StackPane token, Monster m) {
+        // Personality animations disabled during active gameplay to keep framerate smooth.
+        // They are re-enabled only for the active (current-turn) token which already
+        // has the pulse animation. Adding more INDEFINITE animations per token causes
+        // heavy CPU usage with two monsters and 6 stationed monsters all running at once.
     }
 }

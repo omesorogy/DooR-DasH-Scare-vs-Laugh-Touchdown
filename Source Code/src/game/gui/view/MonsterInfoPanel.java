@@ -10,7 +10,6 @@ import javafx.scene.paint.*;
 import javafx.scene.shape.*;
 import javafx.scene.text.*;
 
-import java.io.InputStream;
 
 /**
  * Side panel showing all required monster info:
@@ -242,18 +241,8 @@ public class MonsterInfoPanel extends VBox {
     private Image loadMonsterImage(Monster m) {
         String key = monsterKey(m);
         if (key == null) return null;
-        String[] exts = {".png", ".jpg", ".jpeg"};
-        for (String ext : exts) {
-            String path = "/game/gui/resources/images/" + key + ext;
-            try {
-                InputStream is = getClass().getResourceAsStream(path);
-                if (is != null) {
-                    Image img = new Image(is);
-                    if (!img.isError()) return img;
-                }
-            } catch (Exception ignored) {}
-        }
-        return null;
+        // Use the shared static cache — no disk I/O after first load
+        return GameBoardView.getCachedImage(key);
     }
 
     private String monsterKey(Monster m) {

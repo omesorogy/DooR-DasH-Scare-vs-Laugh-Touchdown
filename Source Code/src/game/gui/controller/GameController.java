@@ -578,6 +578,9 @@ public class GameController {
         cardOverlay.setVisible(true);
         cardOverlay.setOpacity(1.0);
 
+        // Card-flip sound
+        SoundManager.get().playCardFlip();
+
         VBox card = (VBox) cardOverlay.getUserData();
         Label nameL   = (Label) cardOverlay.lookup("#ov-name");
         Label effectL = (Label) cardOverlay.lookup("#ov-effect");
@@ -636,6 +639,7 @@ public class GameController {
         Label sub = (Label) shieldOverlay.lookup("#sh-msg");
         if (sub != null)
             sub.setText(monsterName + "'s shield absorbed the hit and shattered into pieces!");
+        SoundManager.get().playShieldBreak();
         animateOverlayIn(shieldOverlay, onDismiss);
     }
 
@@ -830,8 +834,36 @@ public class GameController {
         Monster moved = model.getCurrent() == model.getPlayer() ? model.getOpponent() : model.getPlayer();
         // current has already switched after playTurn, so the monster that just moved is the opponent of current
         animateDice(roll, () -> {
+            int toPos = movingMonsterBeforeTurn.getPosition();
+            // Compute actual steps moved for the animation path builder.
+            // This is the true distance so the token does not overshoot and backtrack
+            // (important for MultiTaskers who move half the dice roll, and Dashers who move double).
+            int actualStepsMoved;
+            if (toPos >= movingMonsterStartPosition) {
+                actualStepsMoved = toPos - movingMonsterStartPosition;
+            } else if (movingMonsterStartPosition + roll >= 100) {
+                // forward wrap
+                actualStepsMoved = (100 - movingMonsterStartPosition) + toPos;
+            } else {
+                // backward movement (contamination sock / start-over card)
+                actualStepsMoved = movingMonsterStartPosition - toPos;
+            }
             boardView.animateMonsterMove(movingMonsterBeforeTurn, movingMonsterStartPosition,
-                movingMonsterBeforeTurn.getPosition(), roll, () -> {
+                toPos, actualStepsMoved, () -> {
+
+                // Landing sound + particles when monster reaches its cell
+                SoundManager.get().playLanding();
+                boardView.spawnParticles(movingMonsterBeforeTurn.getPosition(),
+                    javafx.scene.paint.Color.web("#FFD700"), 10);
+
+                // Screen shake on contamination sock or energy loss
+                String logPreview = model.getLastLogEntry();
+                if (logPreview != null && (logPreview.toLowerCase().contains("sock")
+                        || logPreview.toLowerCase().contains("energy")
+                        || logPreview.toLowerCase().contains("contaminat"))) {
+                    boardView.screenShake();
+                }
+
                 boardView.unfreezeCellVisualState();
                 refreshAll();
                 String logEntry = model.getLastLogEntry();
@@ -925,6 +957,19 @@ public class GameController {
         animateDice(botRoll, () -> {
             boardView.animateMonsterMove(movingMonsterBeforeTurn, movingMonsterStartPosition,
                 movingMonsterBeforeTurn.getPosition(), botRoll, () -> {
+
+                // Landing sound + particles
+                SoundManager.get().playLanding();
+                boardView.spawnParticles(movingMonsterBeforeTurn.getPosition(),
+                    javafx.scene.paint.Color.web("#FF6622"), 10);
+
+                String botLog = model.getLastLogEntry();
+                if (botLog != null && (botLog.toLowerCase().contains("sock")
+                        || botLog.toLowerCase().contains("energy")
+                        || botLog.toLowerCase().contains("contaminat"))) {
+                    boardView.screenShake();
+                }
+
                 boardView.unfreezeCellVisualState();
                 refreshAll();
                 addLog("BOT: " + model.getLastLogEntry());
@@ -967,22 +1012,24 @@ public class GameController {
         checkWin();
     }
 
+    // Guard: once the win screen is shown, never show it again for this game session.
+    private boolean gameOver = false;
+
     private void checkWin() {
+        if (gameOver) return;          // already handled — ignore duplicate calls
         Monster winner = model.getWinner();
         if (winner != null) {
+            gameOver = true;           // set before anything async so re-entrant calls are blocked
             Monster loser     = (winner == model.getPlayer()) ? model.getOpponent() : model.getPlayer();
             boolean playerWon = (winner == model.getPlayer());
             addLog("WIN: " + winner.getName() + " wins with " + winner.getEnergy() + " energy!");
-            // End screen audio: stop the theme and play only the proper end-screen effect.
             SoundManager.get().pauseMusicForWinScreen();
             if (!multiplayer && !playerWon) {
                 SoundManager.get().playLoseScreenEffect();
             } else {
                 SoundManager.get().playWinScreenEffect();
             }
-            PauseTransition winDelay = new PauseTransition(Duration.millis(400));
-            winDelay.setOnFinished(e -> new WinScreenView(mainStage, winner, loser, playerWon, multiplayer).show());
-            winDelay.play();
+            new WinScreenView(mainStage, winner, loser, playerWon, multiplayer).show();
         }
     }
 
@@ -996,7 +1043,7 @@ public class GameController {
         Monster opponent = model.getOpponent();
         playerPanel.update(player,   current == player);
         opponentPanel.update(opponent, current == opponent);
-        boardView.refresh();
+        boardView.refreshFull();
 
         boolean playerTurn = (current == player);
         String who = multiplayer
@@ -1128,7 +1175,7 @@ public class GameController {
                 }
             }
         }
-        boardView.refresh(); // refresh board so stationed energy labels update
+        boardView.refreshFull(); // refresh board so stationed energy labels update
     }
 
     private void safeMessageStage(String title, String message, String bgColor, String accent) {

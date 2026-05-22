@@ -1,7 +1,11 @@
 package game.engine.dataloader;
 
 import java.io.BufferedReader;
-import java.io.FileReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.io.IOException;
 import java.util.ArrayList;
 
@@ -20,7 +24,7 @@ public class DataLoader {
 	public static ArrayList<Card> readCards() throws IOException {
 		ArrayList<Card> cards = new ArrayList<Card>();
 
-		BufferedReader br = new BufferedReader(new FileReader(CARDS_FILE_NAME));
+		BufferedReader br = openCsv(CARDS_FILE_NAME);
 
 		while (br.ready()) {
 			String nextLine = br.readLine();
@@ -64,7 +68,7 @@ public class DataLoader {
 	public static ArrayList<Cell> readCells() throws IOException {
 		ArrayList<Cell> cells = new ArrayList<Cell>();
 
-		BufferedReader br = new BufferedReader(new FileReader(CELLS_FILE_NAME));
+		BufferedReader br = openCsv(CELLS_FILE_NAME);
 
 		while (br.ready()) {
 			String nextLine = br.readLine();
@@ -94,7 +98,7 @@ public class DataLoader {
 	public static ArrayList<Monster> readMonsters() throws IOException {
 		ArrayList<Monster> monsters = new ArrayList<Monster>();
 
-		BufferedReader br = new BufferedReader(new FileReader(MONSTERS_FILE_NAME));
+		BufferedReader br = openCsv(MONSTERS_FILE_NAME);
 
 		while (br.ready()) {
 			String nextLine = br.readLine();
@@ -129,4 +133,21 @@ public class DataLoader {
 		return monsters;
 	}
 	
+	private static BufferedReader openCsv(String fileName) throws IOException {
+		InputStream in = DataLoader.class.getResourceAsStream("/" + fileName);
+		if (in == null) {
+			in = DataLoader.class.getResourceAsStream("/game/engine/dataloader/" + fileName);
+		}
+		if (in == null) {
+			File externalFile = new File(fileName);
+			if (externalFile.exists()) {
+				in = new FileInputStream(externalFile);
+			}
+		}
+		if (in == null) {
+			throw new IOException("CSV resource not found: " + fileName);
+		}
+		return new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+	}
+
 }

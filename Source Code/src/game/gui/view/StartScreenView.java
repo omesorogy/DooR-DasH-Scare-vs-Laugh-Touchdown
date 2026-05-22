@@ -337,6 +337,7 @@ public class StartScreenView {
     }
 
     public static StackPane buildExitOverlay(Runnable onYes, Runnable onNo) {
+
         StackPane overlay = new StackPane();
         overlay.setStyle("-fx-background-color:rgba(0,0,0,0.88);");
 
